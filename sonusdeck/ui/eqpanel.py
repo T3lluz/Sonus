@@ -26,7 +26,12 @@ _NOTE_Y = 408
 
 
 class EqSlider(QWidget):
-    """One dB fader, vertical for bands or horizontal for the preamp."""
+    """One dB fader, vertical for bands or horizontal for the preamp.
+
+    `value` is the target; `display` is what gets painted and eases toward
+    the target every frame (see tick), so presets, resets and the page
+    entrance all glide instead of snapping. Dragging writes both directly.
+    """
 
     valueChanged = pyqtSignal(float)
 
@@ -44,6 +49,7 @@ class EqSlider(QWidget):
         self.horizontal = horizontal
         self.limit = limit
         self.value = 0.0
+        self.display = 0.0
         self._dragging = False
         if horizontal:
             self.setFixedSize(length or 240, 26)
@@ -59,6 +65,27 @@ class EqSlider(QWidget):
             self.value = value
             self.update()
 
+    def reset_display(self) -> None:
+        """Drop the painted position to the bottom for the slide-up entrance."""
+        self.display = -self.limit
+        self.update()
+
+    # ----- animation -------------------------------------------------------
+
+    def tick(self) -> bool:
+        """Ease the painted position toward the target. True while moving."""
+        if self._dragging:
+            return False
+        delta = self.value - self.display
+        if abs(delta) > 0.02:
+            self.display += delta * 0.18
+            self.update()
+            return True
+        if self.display != self.value:
+            self.display = self.value
+            self.update()
+        return False
+
     def set_accent(self, accent: str) -> None:
         if accent != self.accent:
             self.accent = accent
@@ -73,7 +100,8 @@ class EqSlider(QWidget):
 
     def _pos_for_value(self) -> float:
         lo, hi = self._span()
-        frac = (self.value + self.limit) / (2 * self.limit)
+        shown = max(-self.limit, min(self.limit, self.display))
+        frac = (shown + self.limit) / (2 * self.limit)
         if self.horizontal:
             return lo + (hi - lo) * frac
         return hi - (hi - lo) * frac
@@ -93,6 +121,7 @@ class EqSlider(QWidget):
         value = self._value_at(coord)
         if abs(value - self.value) > 0.001:
             self.value = value
+            self.display = value
             self.update()
             self.valueChanged.emit(value)
 
@@ -321,6 +350,20 @@ class EqPanel(QWidget):
             preamp=self.preamp.value,
             gains=[slider.value for slider in self.sliders],
         )
+
+    # ----- animation --------------------------------------------------------
+
+    def play_entrance(self) -> None:
+        """Start every fader at the bottom so the bands slide up into place."""
+        for slider in self.sliders:
+            slider.reset_display()
+        self.preamp.reset_display()
+
+    def tick(self, _now: float) -> bool:
+        moving = False
+        for slider in self.sliders:
+            moving = slider.tick() or moving
+        return self.preamp.tick() or moving
 
     # ----- internals ------------------------------------------------------
 

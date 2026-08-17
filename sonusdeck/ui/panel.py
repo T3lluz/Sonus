@@ -531,9 +531,12 @@ class Panel(QWidget):
         self.eq_panel.show()
         self.eq_panel.raise_()
         if already_open:
+            # Switching category: the faders glide from the old curve to the new.
             self.eq_panel.move(T.SIDE_PAD, self.eq_panel.y())
         else:
-            # Slide the page in from the right edge while fading it in.
+            # Slide the page in from the right edge while fading it in, with
+            # the faders rising from the bottom like the mixer strips do.
+            self.eq_panel.play_entrance()
             self.eq_panel.move(self.width(), self.eq_panel.y())
             self._slide_eq(T.SIDE_PAD, 0.0, 1.0)
 
@@ -803,6 +806,8 @@ class Panel(QWidget):
         for strip in self.strips.values():
             busy = strip.tick(now) or busy
         busy = self.app_mixer.tick(now) or busy
+        if self._eq_open:
+            busy = self.eq_panel.tick(now) or busy
 
     # ----- dragging -------------------------------------------------------
 

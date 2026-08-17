@@ -121,6 +121,7 @@ class Strip(QWidget):
         self.dragging = False
         self.interact = False
         self._interact_until = 0.0
+        self._mute_hold_until = 0.0
         self._mute_hover = False
         self._thumb_w = self.m.thumb_w
         self._thumb_h = self.m.thumb_h
@@ -150,13 +151,18 @@ class Strip(QWidget):
         if not self.dragging:
             self.volume = max(0.0, min(1.0, volume))
         if muted != self.muted:
-            self.muted = muted
+            # A snapshot taken just before a local mute landed still carries
+            # the old flag; honouring it would bounce the bar. Hold the local
+            # state until the poller has had time to observe the change.
+            if time.perf_counter() >= self._mute_hold_until:
+                self.muted = muted
         if not self.dragging:
             self.target = 0.0 if self.muted else self.volume
         self.update()
 
     def set_muted(self, muted: bool) -> None:
         self.muted = muted
+        self._mute_hold_until = time.perf_counter() + 1.5
         self.target = 0.0 if muted else self.volume
         self.update()
 
