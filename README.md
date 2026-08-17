@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/T3lluz/Sonus/main/install.sh | bash
 One line installs the dependencies, creates the Game / Chat / Media / Aux sinks, tames EasyEffects (no second EQ, no stream stealing), and starts the panel. Re-run it to **update**, append `-s -- uninstall` to **remove**. From a checkout: `./install.sh`.
 
 - App lives in `~/.local/share/sonusdeck`, launchers `sonusdeck` / `sonusdeck-toggle` in `~/.local/bin`
-- First launch registers **Ctrl+Alt+V**, a desktop entry, and start-on-login (toggle in Settings)
+- First launch registers **Ctrl+Alt+V**, a desktop entry, and start-on-login (toggle in Settings) — Sonus starts hidden and waits for the hotkey
 - Different key? Rebind *Sonus Toggle* in your desktop's shortcut settings
 - Settings, routes, and EQ curves persist in `~/.config/sonusdeck/settings.json`
 

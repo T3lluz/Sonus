@@ -336,8 +336,9 @@ section "Finishing up"
 
 step "Starting Sonus"
 if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
-    # First run registers the global shortcut, desktop entry and autostart.
-    (setsid "$BIN_DIR/sonusdeck" >>"$LOG_FILE" 2>&1 </dev/null &) || true
+    # First run registers the global shortcut, desktop entry and start-on-login,
+    # then waits in the background — the panel stays hidden until the hotkey.
+    (setsid "$BIN_DIR/sonusdeck" --autostart >>"$LOG_FILE" 2>&1 </dev/null &) || true
     ok
 else
     warn "no display detected — run 'sonusdeck' from your desktop session"
