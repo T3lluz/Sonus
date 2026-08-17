@@ -66,8 +66,8 @@ class EqSlider(QWidget):
             self.update()
 
     def reset_display(self) -> None:
-        """Drop the painted position to the bottom for the slide-up entrance."""
-        self.display = -self.limit
+        """Park the painted position on the 0 dB detent for the entrance."""
+        self.display = 0.0
         self.update()
 
     # ----- animation -------------------------------------------------------
@@ -354,7 +354,7 @@ class EqPanel(QWidget):
     # ----- animation --------------------------------------------------------
 
     def play_entrance(self) -> None:
-        """Start every fader at the bottom so the bands slide up into place."""
+        """Start every fader flat: boosts slide up, cuts slide down into place."""
         for slider in self.sliders:
             slider.reset_display()
         self.preamp.reset_display()

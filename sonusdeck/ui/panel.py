@@ -535,7 +535,7 @@ class Panel(QWidget):
             self.eq_panel.move(T.SIDE_PAD, self.eq_panel.y())
         else:
             # Slide the page in from the right edge while fading it in, with
-            # the faders rising from the bottom like the mixer strips do.
+            # the faders spreading out from the 0 dB line into the saved curve.
             self.eq_panel.play_entrance()
             self.eq_panel.move(self.width(), self.eq_panel.y())
             self._slide_eq(T.SIDE_PAD, 0.0, 1.0)
