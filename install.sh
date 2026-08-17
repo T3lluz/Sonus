@@ -106,7 +106,9 @@ if [ "$ACTION" = "uninstall" ]; then
 
     step "User service"
     if command -v systemctl >/dev/null 2>&1; then
-        run systemctl --user disable --now sonusdeck.service || true
+        for unit in sonusdeck.service sonusdeck-panel.service; do
+            run systemctl --user disable --now "$unit" || true
+        done
         ok
     else
         skipped
@@ -130,6 +132,7 @@ if [ "$ACTION" = "uninstall" ]; then
     step "Desktop entries, icon + autostart"
     rm -f "$CONFIG_HOME/autostart/sonusdeck.desktop" \
           "$CONFIG_HOME/systemd/user/sonusdeck.service" \
+          "$CONFIG_HOME/systemd/user/sonusdeck-panel.service" \
           "$DATA_HOME/applications/sonusdeck.desktop" \
           "$DATA_HOME/applications/sonusdeck-toggle.desktop" \
           "$DATA_HOME/icons/hicolor/512x512/apps/sonusdeck.png"
@@ -279,6 +282,26 @@ else
     ok
 fi
 
+# The panel compares this against the branch head to spot updates. Installs
+# made from a local tree have no .git of their own, hence the stamp.
+stamp_install() {
+    local src="" sha="" date=""
+    if [ -d "$APP_DIR/.git" ]; then
+        src="$APP_DIR"
+    elif [ -n "$LOCAL_SRC" ] && [ -d "$LOCAL_SRC/.git" ]; then
+        src="$LOCAL_SRC"
+    else
+        return 1
+    fi
+    sha="$(git -C "$src" rev-parse HEAD 2>/dev/null || true)"
+    [ -n "$sha" ] || return 1
+    date="$(git -C "$src" log -1 --format=%cI 2>/dev/null || true)"
+    printf '{"commit": "%s", "date": "%s"}\n' "$sha" "$date" > "$APP_DIR/.sonus-commit"
+}
+
+step "Recording version"
+if stamp_install; then ok; else skipped; fi
+
 # ---------- python runtime ----------
 section "Python runtime"
 
@@ -320,6 +343,19 @@ esac
 
 # ---------- audio graph ----------
 section "Audio graph"
+
+# Superseded units start the panel without --autostart, which pops the mixer
+# open at every login.
+step "Retiring old services"
+if command -v systemctl >/dev/null 2>&1 \
+   && [ -f "$CONFIG_HOME/systemd/user/sonusdeck-panel.service" ]; then
+    run systemctl --user disable --now sonusdeck-panel.service || true
+    rm -f "$CONFIG_HOME/systemd/user/sonusdeck-panel.service"
+    run systemctl --user daemon-reload || true
+    ok
+else
+    skipped
+fi
 
 step "Stopping a running panel"
 run "$BIN_DIR/sonusdeck" --quit || true

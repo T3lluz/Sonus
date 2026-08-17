@@ -29,6 +29,7 @@ One line installs the dependencies, creates the Game / Chat / Media / Aux sinks,
 - First launch registers **Ctrl+Alt+V**, a desktop entry, and start-on-login (toggle in Settings) — Sonus starts hidden and waits for the hotkey
 - Different key? Rebind *Sonus Toggle* in your desktop's shortcut settings
 - Settings, routes, and EQ curves persist in `~/.config/sonusdeck/settings.json`
+- Settings shows the installed build and an **Update** chip when the GitLab branch has moved on — a dot on the gear flags it
 
 ## 🎚️ Mixer
 

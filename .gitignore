@@ -6,4 +6,5 @@ dist/
 .venv/
 venv/
 _shots/
+.sonus-commit
 .research_easyeffects/

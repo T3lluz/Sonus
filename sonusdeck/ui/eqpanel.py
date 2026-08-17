@@ -336,9 +336,8 @@ class EqPanel(QWidget):
         self.preamp.set_accent(accent)
         self.preamp.set_value(state.preamp)
         self.note.setText(
-            "Runs only on this category's PipeWire sink. EasyEffects stays a "
-            "post-mix slot for extra effects — its own equaliser is left off "
-            "so the two don't stack."
+            "The sliders icon opens that category's EQ. No need for direct "
+            "EasyEffects tuning."
         )
         self._refresh_labels()
         self._loading = False

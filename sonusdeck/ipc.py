@@ -45,12 +45,16 @@ class CommandServer(QObject):
         self._server.newConnection.connect(self._on_connection)
 
     def listen(self) -> bool:
-        if not self._server.listen(SERVER_NAME):
-            # A socket file left behind by a crash blocks the bind.
-            QLocalServer.removeServer(SERVER_NAME)
-            if not self._server.listen(SERVER_NAME):
-                return False
-        return True
+        if self._server.listen(SERVER_NAME):
+            return True
+        # A socket file left behind by a crash blocks the bind. Clearing it is
+        # only safe once nothing answers on it: XDG autostart and the systemd
+        # unit fire together at login, and evicting the winner of that race
+        # would leave two panels running.
+        if instance_running():
+            return False
+        QLocalServer.removeServer(SERVER_NAME)
+        return self._server.listen(SERVER_NAME)
 
     def close(self) -> None:
         self._server.close()

@@ -8,6 +8,7 @@
     eq.py        per-category 10-band equaliser
     shortcut.py  KDE global shortcut registration
     ipc.py       single instance and the toggle channel
+    updater.py   update checks against the GitLab branch head
     ui/          strip, appmixer, eqpanel, widgets, panel
     app.py       entry point
 """

@@ -12,7 +12,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QBrush, QColor, QCursor, QGuiApplication, QPainter
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel, QMenu, QWidget
 
-from .. import effects, pipewire
+from .. import __version__, effects, pipewire, updater
 from .. import eq as eqmod
 from .. import theme as T
 from ..config import (
@@ -57,6 +57,10 @@ class Poller(QThread):
 
 
 class Panel(QWidget):
+    # Update work runs on the shared pool; these carry results back.
+    updateChecked = pyqtSignal(object)
+    updateStarted = pyqtSignal(bool)
+
     def __init__(self, settings: dict, graph: GraphProcess) -> None:
         super().__init__(None)
         self.settings = settings
@@ -70,6 +74,11 @@ class Panel(QWidget):
         self._eq_open = False
         self._drag_origin: QPoint | None = None
         self._pool = ThreadPoolExecutor(max_workers=3)
+
+        self._upd_state = "unknown"
+        self._upd_local = ""
+        self._upd_busy = False
+        self._upd_checked_at = 0.0
 
         self._eq_keys = tuple(c.key for c in SINK_CHANNELS)
         self._eqs = eqmod.load_all(settings, self._eq_keys)
@@ -114,6 +123,9 @@ class Panel(QWidget):
         self.eq_persist_timer.setInterval(800)
         self.eq_persist_timer.setSingleShot(True)
         self.eq_persist_timer.timeout.connect(self._persist_eq)
+
+        self.updateChecked.connect(self._upd_checked)
+        self.updateStarted.connect(self._upd_started)
 
         self.poller = Poller(self._current_routes, self)
         self.poller.updated.connect(self._on_snapshot)
@@ -246,18 +258,36 @@ class Panel(QWidget):
         y = self._settings_caption(y + 14, "SHORTCUT")
         y = self._settings_note(
             y,
-            f"{HOTKEY} shows or hides the panel. To use a different key, "
-            f"rebind the \u201c{APP_NAME} Toggle\u201d entry in your desktop's "
-            "shortcut settings.",
+            f"{HOTKEY} toggles the panel. Rebind \u201c{APP_NAME} Toggle\u201d "
+            "in desktop shortcuts.",
         )
 
         y = self._settings_caption(y + 14, "EQUALIZER")
-        self._settings_note(
+        y = self._settings_note(
             y,
-            "Each category has its own equaliser: click the sliders icon on "
-            "Game, Chat, Media or Aux. EasyEffects stays a post-mix slot for "
-            "extra effects — its equaliser is left off so the two don't stack.",
+            "The sliders icon opens that category's EQ. No need for direct "
+            "EasyEffects tuning.",
         )
+
+        self._build_update_row(y)
+
+    def _build_update_row(self, y: int) -> None:
+        """Footer strip: which build is installed, and a chip to move it on."""
+        pad = T.SETTINGS_PAD
+        height = 48
+        card = Card(parent=self.drawer)
+        card.setFixedSize(T.SETTINGS_W - pad * 2, height)
+        card.move(pad, min(y, T.STRIP_H - 14 - height))
+
+        self._upd_label = QLabel("", card)
+        self._upd_label.setFont(T.font(9))
+        self._upd_label.setStyleSheet(f"color: {T.DIM}; background: transparent;")
+        self._upd_label.setFixedWidth(card.width() - 160)
+        self._upd_label.move(16, (height - 16) // 2)
+
+        self._upd_chip = ChipButton("Check", height=28, parent=card)
+        self._upd_chip.clicked.connect(self._upd_clicked)
+        self._upd_render()
 
     def _build_eq_panel(self) -> None:
         """The EQ is a full page sliding over the deck, not a drawer."""
@@ -432,6 +462,7 @@ class Panel(QWidget):
         self.activateWindow()
         self._animate(resting + QPoint(0, T.RISE_PX), resting, 0.0, 1.0, T.SHOW_MS, closing=False)
         self._pool.submit(self._refresh_now)
+        self._upd_check()
         self.frame_timer.start()
 
     def hide_panel(self) -> None:
@@ -509,6 +540,7 @@ class Panel(QWidget):
         if self._eq_open:
             self._close_eq_panel(animate=False)
         self._drawer_open = True
+        self._upd_check()
         self.drawer.show()
         self.drawer.raise_()
         self._slide_drawer(self._drawer_x(True))
@@ -673,6 +705,85 @@ class Panel(QWidget):
             self._pool.submit(self.graph.start)
         else:
             self._pool.submit(self.graph.stop)
+
+    # ----- updates ---------------------------------------------------------
+
+    def _upd_render(self) -> None:
+        text = f"{APP_NAME} {__version__}"
+        if self._upd_local:
+            text += f" \u00b7 {updater.short(self._upd_local)}"
+        self._upd_label.setText(text)
+        self._upd_chip.set_text(self._upd_chip_text())
+        card = self._upd_chip.parentWidget()
+        self._upd_chip.move(
+            card.width() - 16 - self._upd_chip.width(),
+            (card.height() - self._upd_chip.height()) // 2,
+        )
+        self.gear_btn.set_badge(self._upd_state == "outdated" and not self._upd_busy)
+
+    def _upd_chip_text(self) -> str:
+        if self._upd_busy:
+            return "Updating\u2026" if self._upd_state == "outdated" else "Checking\u2026"
+        return {
+            "current": "Up to date",
+            "outdated": "Update",
+            "failed": "Retry",
+        }.get(self._upd_state, "Check")
+
+    def _upd_clicked(self) -> None:
+        if self._upd_busy:
+            return
+        if self._upd_state == "outdated":
+            self._upd_apply()
+        else:
+            self._upd_check(force=True)
+
+    def _upd_check(self, force: bool = False) -> None:
+        """Ask GitLab for the branch head. Silent when the network is away."""
+        if self._upd_busy:
+            return
+        now = time.monotonic()
+        if not force and self._upd_checked_at and now - self._upd_checked_at < 3600:
+            return
+        self._upd_checked_at = now
+        self._upd_busy = True
+        self._upd_render()
+        self._pool.submit(self._upd_check_worker)
+
+    def _upd_check_worker(self) -> None:
+        try:
+            status = updater.check()
+        except Exception:
+            status = updater.Status("unknown")
+        self.updateChecked.emit(status)
+
+    def _upd_checked(self, status) -> None:
+        self._upd_busy = False
+        self._upd_state = status.state
+        if status.local:
+            self._upd_local = status.local
+        self._upd_render()
+
+    def _upd_apply(self) -> None:
+        """Hand over to the installer; it updates and restarts the panel."""
+        self._upd_busy = True
+        self._upd_render()
+        self._pool.submit(self._upd_apply_worker)
+
+    def _upd_apply_worker(self) -> None:
+        try:
+            ok = updater.apply_update()
+        except Exception:
+            ok = False
+        self.updateStarted.emit(ok)
+
+    def _upd_started(self, ok: bool) -> None:
+        if ok:
+            # The installer stops this instance and starts the new build.
+            return
+        self._upd_busy = False
+        self._upd_state = "failed"
+        self._upd_render()
 
     def _open_effects(self) -> None:
         if not effects.launch():

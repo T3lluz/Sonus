@@ -492,8 +492,15 @@ class IconButton(QWidget):
         super().__init__(parent)
         self.kind = kind
         self._hover = False
+        self._badge = False
         self.setFixedSize(size, size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_badge(self, on: bool) -> None:
+        """Small accent dot, e.g. an update waiting behind the gear."""
+        if on != self._badge:
+            self._badge = on
+            self.update()
 
     def enterEvent(self, event) -> None:
         self._hover = True
@@ -530,6 +537,12 @@ class IconButton(QWidget):
             pad = 10
             painter.drawLine(QPointF(pad, pad), QPointF(size - pad, size - pad))
             painter.drawLine(QPointF(size - pad, pad), QPointF(pad, size - pad))
+        if self._badge:
+            _no_pen(painter)
+            painter.setBrush(QBrush(QColor(T.BG)))
+            painter.drawEllipse(QPointF(size - 8.0, 8.0), 5.0, 5.0)
+            painter.setBrush(QBrush(QColor(T.FILL)))
+            painter.drawEllipse(QPointF(size - 8.0, 8.0), 3.5, 3.5)
         painter.end()
 
     @staticmethod

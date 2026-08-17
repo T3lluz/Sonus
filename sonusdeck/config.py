@@ -233,6 +233,29 @@ def _systemctl(*args: str) -> bool:
         return False
 
 
+# Units from earlier iterations. They launch the panel without --autostart,
+# so every login either pops the mixer open or toggles the copy that the
+# supported entries already started.
+LEGACY_UNITS = (f"{APP_ID}-panel.service",)
+
+
+def cleanup_legacy_units() -> None:
+    """Stop, disable and delete superseded user services."""
+    removed = False
+    for name in LEGACY_UNITS:
+        path = SYSTEMD_UNIT_PATH.parent / name
+        if not path.exists():
+            continue
+        _systemctl("disable", "--now", name)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            continue
+        removed = True
+    if removed:
+        _systemctl("daemon-reload")
+
+
 def set_autostart(enabled: bool) -> None:
     """Start with the system: XDG autostart plus a systemd user unit.
 

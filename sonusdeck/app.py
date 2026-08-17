@@ -49,8 +49,8 @@ def main(argv: list[str] | None = None) -> int:
 
     from . import dbusapi, ipc, shortcut
     from .config import (
-        APP_NAME, HOTKEY, ICON_SOURCE, load_settings, save_settings, set_autostart,
-        write_launch_desktop,
+        APP_NAME, HOTKEY, ICON_SOURCE, cleanup_legacy_units, load_settings,
+        save_settings, set_autostart, write_launch_desktop,
     )
     from .graph import GraphProcess
     from .ui.panel import Panel
@@ -81,6 +81,12 @@ def main(argv: list[str] | None = None) -> int:
 
     server = ipc.CommandServer()
     if not server.listen():
+        if ipc.instance_running():
+            # Lost the login race with the other autostart entry; it has this
+            # session. Stepping aside quietly keeps systemd from restarting us.
+            if args.toggle or not args.autostart:
+                ipc.send("toggle")
+            return 0
         print("could not claim the control socket", file=sys.stderr)
         return 1
 
@@ -92,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         effects.ensure_passthrough()
         effects.ensure_manual_routing()
 
+    cleanup_legacy_units()
     set_autostart(bool(settings.get("autostart", True)))
     write_launch_desktop()
     shortcut.install(HOTKEY)
