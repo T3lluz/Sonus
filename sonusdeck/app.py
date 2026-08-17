@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from PyQt6.QtWidgets import QApplication
 
-    from . import ipc, shortcut
+    from . import dbusapi, ipc, shortcut
     from .config import APP_NAME, load_settings, save_settings, set_autostart, write_launch_desktop
     from .graph import GraphProcess
     from .ui.panel import Panel
@@ -75,13 +75,12 @@ def main(argv: list[str] | None = None) -> int:
 
     set_autostart(bool(settings.get("autostart", True)))
     write_launch_desktop()
-    wanted = settings.get("hotkey")
-    # Reinstalling restarts kglobalaccel, so only do it when the binding moved.
-    if wanted and shortcut.normalise(wanted) != shortcut.current():
-        shortcut.install(wanted)
+    shortcut.install(settings.get("hotkey", "Ctrl+Alt+V"))
 
     panel = Panel(settings, graph)
     server.toggled.connect(panel.toggle)
+    bus = dbusapi.BusApi(panel)
+    bus.register()
 
     def shutdown() -> None:
         save_settings(panel.settings)

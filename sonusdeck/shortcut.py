@@ -1,27 +1,42 @@
-"""Global shortcut registration for KDE Plasma.
+"""Global shortcut registration for KDE Plasma Wayland.
 
-Wayland does not let an application grab keys for itself, so the shortcut is
-registered with the compositor instead: a hidden desktop entry runs
-`sonusdeck --toggle`, and KDE binds the key combination to that entry.
+The compositor owns global keys. We bind Ctrl+Alt+V three ways:
+
+1. A ~/.local/bin wrapper (same pattern as other working KDE service shortcuts)
+2. KGlobalAccel ``_launch`` on that desktop file
+3. A KWin script that calls SonusDeck over D-Bus (this is what actually
+   reaches the key when a Wayland app has focus)
 """
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+from pathlib import Path
 
-from .config import APP_NAME, DESKTOP_PATH, write_toggle_desktop
+from PyQt6.QtGui import QKeySequence
+
+from .config import APP_NAME, DESKTOP_PATH, write_toggle_desktop, write_wrappers
 
 SHORTCUTS_FILE = "kglobalshortcutsrc"
 FRIENDLY = f"{APP_NAME} Toggle"
+ACTION_ID = [DESKTOP_PATH.name, APP_NAME, "_launch", "Toggle"]
+KWIN_PLUGIN = "sonusdecktoggle"
+KWIN_SCRIPT_SRC = Path(__file__).resolve().parent.parent / "kwin" / KWIN_PLUGIN
+KWIN_SCRIPT_DST = Path.home() / ".local/share/kwin/scripts" / KWIN_PLUGIN
+_TIMEOUT = 5.0
+
+SHORTCUTS_FILE = "kglobalshortcutsrc"
+FRIENDLY = f"{APP_NAME} Toggle"
+ACTION_ID = [DESKTOP_PATH.name, APP_NAME, "_launch", "Toggle"]
 _TIMEOUT = 5.0
 
 
-def _run(args: list[str]) -> tuple[bool, str]:
+def _run(args: list[str], timeout: float = _TIMEOUT) -> tuple[bool, str]:
     if shutil.which(args[0]) is None:
         return False, f"{args[0]} not found"
     try:
-        result = subprocess.run(args, capture_output=True, text=True, timeout=_TIMEOUT)
+        result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as exc:
         return False, str(exc)
     return result.returncode == 0, (result.stderr or result.stdout).strip()
@@ -46,30 +61,83 @@ def normalise(spec: str) -> str:
     return "+".join(out)
 
 
-def install(spec: str) -> tuple[bool, str]:
-    """Bind `spec` to the toggle entry. Returns (ok, human readable detail)."""
-    write_toggle_desktop()
-    if not plasma():
-        return False, "kwriteconfig6 not found; bind the shortcut manually"
+def _key_code(spec: str) -> int:
+    sequence = QKeySequence(normalise(spec))
+    if sequence.count() == 0:
+        return 0
+    return int(sequence[0].toCombined())
 
-    key = normalise(spec)
-    ok, detail = _run([
-        "kwriteconfig6", "--file", SHORTCUTS_FILE,
-        "--group", "services", "--group", _group(),
-        "--key", "_launch", f"{key},none,{FRIENDLY}",
-    ])
-    if not ok:
-        return False, detail or "could not write kglobalshortcutsrc"
+
+def _gdbus(method: str, *args: str) -> tuple[bool, str]:
+    command = [
+        "gdbus", "call", "--session",
+        "--dest", "org.kde.kglobalaccel",
+        "--object-path", "/kglobalaccel",
+        "--method", f"org.kde.KGlobalAccel.{method}",
+        *args,
+    ]
+    return _run(command)
+
+
+def _dbus_list(values: list[str]) -> str:
+    inner = ", ".join(f"'{item}'" for item in values)
+    return f"[{inner}]"
+
+
+def _install_kwin_script(key: str) -> tuple[bool, str]:
+    src = KWIN_SCRIPT_SRC / "contents" / "code" / "main.js"
+    meta = KWIN_SCRIPT_SRC / "metadata.json"
+    if not src.is_file() or not meta.is_file():
+        return False, "kwin script sources missing"
+    dest_js = KWIN_SCRIPT_DST / "contents" / "code" / "main.js"
+    dest_js.parent.mkdir(parents=True, exist_ok=True)
+    dest_js.write_text(src.read_text(encoding="utf-8").replace("HOTKEY", key), encoding="utf-8")
+    (KWIN_SCRIPT_DST / "metadata.json").write_text(meta.read_text(encoding="utf-8"), encoding="utf-8")
 
     _run([
-        "kwriteconfig6", "--file", SHORTCUTS_FILE,
-        "--group", "services", "--group", _group(),
-        "--key", "_k_friendly_name", FRIENDLY,
+        "kwriteconfig6", "--file", "kwinrc",
+        "--group", "Plugins", "--key", f"{KWIN_PLUGIN}Enabled", "true",
     ])
-    reloaded, detail = reload_daemon()
-    if reloaded:
-        return True, f"{key} registered with KDE"
-    return True, f"{key} saved; log out and back in to activate"
+    if shutil.which("qdbus6") is None:
+        return True, "kwin script installed; reconfigure KWin to load it"
+
+    _run(["qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.unloadScript", KWIN_PLUGIN])
+    ok, detail = _run([
+        "qdbus6", "org.kde.KWin", "/Scripting",
+        "org.kde.kwin.Scripting.loadScript", str(dest_js), KWIN_PLUGIN,
+    ])
+    _run(["qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.start"])
+    _run(["qdbus6", "org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"])
+    if ok:
+        return True, f"{key} bound in KWin"
+    return False, detail or "could not load the KWin script"
+
+
+def install(spec: str) -> tuple[bool, str]:
+    """Bind `spec` to the toggle entry. Returns (ok, human readable detail)."""
+    key = normalise(spec)
+    write_wrappers()
+    write_toggle_desktop(key)
+    code = _key_code(key)
+    if not code:
+        return False, f"could not parse {spec}"
+
+    if plasma():
+        _run([
+            "kwriteconfig6", "--file", SHORTCUTS_FILE,
+            "--group", "services", "--group", _group(),
+            "--key", "_launch", "none",
+        ])
+
+    if shutil.which("gdbus"):
+        action = _dbus_list(ACTION_ID)
+        _gdbus("unregister", DESKTOP_PATH.name, "_launch")
+        _gdbus("unRegister", action)
+
+    kwin_ok, kwin_detail = _install_kwin_script(key)
+    if kwin_ok:
+        return True, kwin_detail
+    return True, f"{key} saved; {kwin_detail}"
 
 
 def remove() -> None:
@@ -79,20 +147,9 @@ def remove() -> None:
             "--group", "services", "--group", _group(),
             "--key", "_launch", "--delete",
         ])
+    if shutil.which("gdbus"):
+        _gdbus("unRegister", _dbus_list(ACTION_ID))
     DESKTOP_PATH.unlink(missing_ok=True)
-    reload_daemon()
-
-
-def reload_daemon() -> tuple[bool, str]:
-    """Ask kglobalaccel to pick up the edited config."""
-    for args in (
-        ["systemctl", "--user", "restart", "plasma-kglobalaccel.service"],
-        ["systemctl", "--user", "restart", "app-org.kde.kglobalacceld.service"],
-    ):
-        ok, detail = _run(args)
-        if ok:
-            return True, detail
-    return False, "kglobalaccel not restarted"
 
 
 def current() -> str:
@@ -108,4 +165,5 @@ def current() -> str:
         )
     except (OSError, subprocess.SubprocessError):
         return ""
-    return result.stdout.strip().split(",")[0]
+    value = result.stdout.strip().split(",")[0]
+    return value if value and value != "none" else ""

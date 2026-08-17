@@ -7,6 +7,7 @@ from PyQt6.QtGui import QBrush, QColor, QIcon, QPainter
 from PyQt6.QtWidgets import QWidget
 
 from .. import theme as T
+from ..config import CHANNEL_BY_KEY
 from ..pipewire import AppStream
 from .widgets import Strip, lerp
 
@@ -117,6 +118,9 @@ class AppMixer(QWidget):
                 strip.volumeChanged.connect(self.volumeChanged)
                 strip.muteToggled.connect(self.muteToggled)
                 strip.scrolled.connect(self._on_wheel_delta)
+                strip.channelClicked.connect(
+                    lambda k, s=strip: self.routeRequested.emit(k, s.mapToGlobal(s.rect().center()))
+                )
                 strip.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
                 strip.customContextMenuRequested.connect(
                     lambda pos, k=stream.key, s=strip: self.routeRequested.emit(
@@ -131,6 +135,11 @@ class AppMixer(QWidget):
                 strip.set_meta(stream.name, app_icon(stream))
                 if stream.key not in busy:
                     strip.apply_state(stream.volume, stream.muted)
+            channel = CHANNEL_BY_KEY.get(stream.channel)
+            if channel:
+                strip.set_route(channel.key, channel.label, channel.accent)
+            else:
+                strip.set_route("", "ASSIGN", T.DIM)
             strip.move(index * (T.APP_STRIP_W + T.STRIP_GAP), 0)
 
         self.inner.setFixedWidth(max(1, self._content_w()))
@@ -229,6 +238,13 @@ class AppMixer(QWidget):
             painter.drawText(
                 QRectF(0, T.STRIP_H / 2 + 2, self._view_w, 22),
                 Qt.AlignmentFlag.AlignCenter, "No app audio",
+            )
+            painter.setFont(T.font(9))
+            painter.setPen(QColor(T.DIM))
+            painter.drawText(
+                QRectF(16, T.STRIP_H / 2 + 28, self._view_w - 32, 40),
+                Qt.AlignmentFlag.AlignCenter,
+                "Playing apps appear here.\nClick one to send it to Game, Chat, Media or Aux.",
             )
             painter.end()
             return

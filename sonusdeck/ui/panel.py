@@ -696,10 +696,18 @@ class Panel(QWidget):
         app = next((a for a in self._snapshot.apps if a.key == key), None)
         if app is None:
             return
+        routes = dict(self.settings.get("routes") or {})
+        if not channel_key:
+            routes.pop(app.binary or app.key, None)
+            self.settings["routes"] = routes
+            self._persist()
+            target = self._snapshot.mix_target or self._snapshot.default_sink
+            if target:
+                self._pool.submit(pipewire.move_stream, app.serial, target)
+            return
         channel = next((c for c in ROUTABLE if c.key == channel_key), None)
         if channel is None:
             return
-        routes = dict(self.settings.get("routes") or {})
         routes[app.binary or app.key] = channel_key
         self.settings["routes"] = routes
         self._persist()
@@ -718,6 +726,9 @@ class Panel(QWidget):
             action.triggered.connect(
                 lambda _checked, c=channel.key, k=key: self.route_app(k, c)
             )
+        menu.addSeparator()
+        reset = menu.addAction("Send to output (EasyEffects)")
+        reset.triggered.connect(lambda _checked, k=key: self.route_app(k, ""))
         menu.exec(global_pos)
 
     # ----- frame loop -----------------------------------------------------

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +61,12 @@ GRAPH_CONF_PATH = CONFIG_DIR / GRAPH_CONF
 AUTOSTART_PATH = _xdg("XDG_CONFIG_HOME", ".config") / "autostart" / f"{APP_ID}.desktop"
 DESKTOP_PATH = _xdg("XDG_DATA_HOME", ".local/share") / "applications" / f"{APP_ID}-toggle.desktop"
 LAUNCH_DESKTOP_PATH = _xdg("XDG_DATA_HOME", ".local/share") / "applications" / f"{APP_ID}.desktop"
+BIN_DIR = Path.home() / ".local/bin"
+TOGGLE_BIN = BIN_DIR / f"{APP_ID}-toggle"
+LAUNCH_BIN = BIN_DIR / APP_ID
+DBUS_SERVICE = "dev.t3lluz.SonusDeck"
+DBUS_PATH = "/Panel"
+DBUS_INTERFACE = "dev.t3lluz.SonusDeck"
 
 
 def runtime_dir() -> Path:
@@ -104,25 +112,46 @@ def _script() -> Path:
     return Path(__file__).resolve().parent.parent / "sonus_deck.py"
 
 
+def python_executable() -> str:
+    """Real interpreter, not the Cursor AppImage that launched us."""
+    exe = sys.executable or ""
+    low = exe.lower()
+    if exe and os.path.isfile(exe) and "appimage" not in low and "cursor" not in Path(exe).name.lower():
+        return exe
+    return shutil.which("python3") or "/usr/bin/python3"
+
+
+def write_wrappers() -> None:
+    """Install ~/.local/bin launchers. KDE shortcuts need a single unquoted Exec."""
+    BIN_DIR.mkdir(parents=True, exist_ok=True)
+    py = python_executable()
+    script = str(_script())
+    TOGGLE_BIN.write_text(
+        f"#!/bin/sh\nexec {shlex.quote(py)} {shlex.quote(script)} --toggle \"$@\"\n",
+        encoding="utf-8",
+    )
+    LAUNCH_BIN.write_text(
+        f"#!/bin/sh\nexec {shlex.quote(py)} {shlex.quote(script)} \"$@\"\n",
+        encoding="utf-8",
+    )
+    mode = stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH
+    TOGGLE_BIN.chmod(mode)
+    LAUNCH_BIN.chmod(mode)
+
+
 def launch_command() -> str:
-    script = _script()
-    if shutil.which(APP_ID) and not script.is_file():
-        return f"{APP_ID} --autostart"
-    return f'"{sys.executable}" "{script}" --autostart'
+    write_wrappers()
+    return str(LAUNCH_BIN) + " --autostart"
 
 
 def toggle_command() -> str:
-    script = _script()
-    if shutil.which(APP_ID) and not script.is_file():
-        return f"{APP_ID} --toggle"
-    return f'"{sys.executable}" "{script}" --toggle'
+    write_wrappers()
+    return str(TOGGLE_BIN)
 
 
 def show_command() -> str:
-    script = _script()
-    if shutil.which(APP_ID) and not script.is_file():
-        return APP_ID
-    return f'"{sys.executable}" "{script}"'
+    write_wrappers()
+    return str(LAUNCH_BIN)
 
 
 _DESKTOP_TEMPLATE = """[Desktop Entry]
@@ -135,6 +164,7 @@ Terminal=false
 Categories=AudioVideo;Audio;Mixer;
 StartupNotify=false
 X-GNOME-Autostart-enabled=true
+X-KDE-Shortcuts={shortcuts}
 NoDisplay={nodisplay}
 """
 
@@ -150,12 +180,13 @@ def set_autostart(enabled: bool) -> None:
             comment="Hotkey volume mixer for PipeWire",
             exec=launch_command(),
             nodisplay="true",
+            shortcuts="",
         ),
         encoding="utf-8",
     )
 
 
-def write_toggle_desktop() -> Path:
+def write_toggle_desktop(hotkey: str = "Ctrl+Alt+V") -> Path:
     DESKTOP_PATH.parent.mkdir(parents=True, exist_ok=True)
     DESKTOP_PATH.write_text(
         _DESKTOP_TEMPLATE.format(
@@ -163,6 +194,7 @@ def write_toggle_desktop() -> Path:
             comment="Show or hide the SonusDeck mixer",
             exec=toggle_command(),
             nodisplay="true",
+            shortcuts=hotkey,
         ),
         encoding="utf-8",
     )
@@ -177,6 +209,7 @@ def write_launch_desktop() -> Path:
             comment="Hotkey volume mixer for PipeWire",
             exec=show_command(),
             nodisplay="false",
+            shortcuts="",
         ),
         encoding="utf-8",
     )

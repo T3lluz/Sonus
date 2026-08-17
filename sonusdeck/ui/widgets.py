@@ -28,6 +28,7 @@ class Strip(QWidget):
     volumeChanged = pyqtSignal(str, float)
     muteToggled = pyqtSignal(str)
     scrolled = pyqtSignal(int)
+    channelClicked = pyqtSignal(str)
 
     def __init__(
         self,
@@ -63,6 +64,11 @@ class Strip(QWidget):
         self._thumb_h = T.THUMB_H
         self._pixmap: QPixmap | None = None
         self._allow_scroll_through = app
+        self.route_key = ""
+        self.route_label = "ASSIGN"
+        self.route_accent = T.DIM
+        pill_w = width - 28
+        self._route_rect = QRectF((width - pill_w) / 2, T.PCT_Y + 16, pill_w, 22)
 
         mx = (width - T.MUTE_SIZE) / 2
         self._mute_rect = QRectF(mx, T.MUTE_Y0, T.MUTE_SIZE, T.MUTE_SIZE)
@@ -93,6 +99,14 @@ class Strip(QWidget):
                 changed = True
         if changed:
             self.update()
+
+    def set_route(self, key: str, label: str, accent: str) -> None:
+        if (self.route_key, self.route_label, self.route_accent) == (key, label, accent):
+            return
+        self.route_key = key
+        self.route_label = label
+        self.route_accent = accent
+        self.update()
 
     def reset_display(self) -> None:
         self.display = 0.0
@@ -139,6 +153,9 @@ class Strip(QWidget):
         pos = event.position()
         if self._mute_rect.contains(pos):
             self.muteToggled.emit(self.key)
+            return
+        if self.app and pos.y() < T.FADER_TOP - 8:
+            self.channelClicked.emit(self.key)
             return
         if self.muted:
             self.muteToggled.emit(self.key)
@@ -223,6 +240,15 @@ class Strip(QWidget):
             QRectF(0, T.PCT_Y - 11, self.strip_w, 22),
             Qt.AlignmentFlag.AlignCenter, f"{int(round(self.display * 100))}%",
         )
+
+        if self.app:
+            _no_pen(painter)
+            assigned = bool(self.route_key)
+            painter.setBrush(QBrush(QColor(self.route_accent if assigned else T.MUTE_BG)))
+            painter.drawRoundedRect(self._route_rect, 11, 11)
+            painter.setFont(T.semibold(8))
+            painter.setPen(QColor("#1A1F23" if assigned else T.TEXT))
+            painter.drawText(self._route_rect, Qt.AlignmentFlag.AlignCenter, self.route_label)
 
         fill_color = T.FILL_MUTED if self.muted else self.accent
         cy = T.FADER_BOT - (T.FADER_BOT - T.FADER_TOP) * self.display
