@@ -6,6 +6,7 @@ import json
 import subprocess
 from dataclasses import dataclass, field
 
+from . import eq as eqmod
 from .config import NODE_PREFIX, SINK_CHANNELS
 
 STREAM_CLASSES = ("Stream/Output/Audio",)
@@ -23,7 +24,6 @@ _SKIP_APPS = frozenset({
 _CUBE = 1.0 / 3.0
 
 EFFECTS_SINK = "easyeffects_sink"
-EFFECTS_SOURCE = "easyeffects_source"
 
 
 def _linear(cubic: float) -> float:
@@ -60,6 +60,8 @@ class AppStream:
     binary: str = ""
     channel: str = ""
     members: list[int] = field(default_factory=list)
+    # node.name of every member stream; EasyEffects' exclude list matches these.
+    node_names: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -125,10 +127,6 @@ def default_sink_name() -> str:
     return _run(["pactl", "get-default-sink"]).strip()
 
 
-def default_source_name() -> str:
-    return _run(["pactl", "get-default-source"]).strip()
-
-
 def mix_target_name() -> str:
     """Where channel outputs should land so EasyEffects can EQ the device."""
     sinks = _short_names("sinks")
@@ -140,20 +138,6 @@ def mix_target_name() -> str:
     for name in sinks:
         if not name.startswith(NODE_PREFIX):
             return name
-    return default
-
-
-def mic_source_name() -> str:
-    sources = _short_names("sources")
-    if EFFECTS_SOURCE in sources:
-        return EFFECTS_SOURCE
-    default = default_source_name()
-    if default and not default.endswith(".monitor") and not default.startswith(NODE_PREFIX):
-        return default
-    for name in sources:
-        if name.endswith(".monitor") or name.startswith(NODE_PREFIX):
-            continue
-        return name
     return default
 
 
@@ -220,20 +204,6 @@ def snapshot() -> Snapshot:
             muted=muted,
         )
 
-    mic_name = mic_source_name()
-    mic = by_name.get(mic_name)
-    if mic is not None:
-        obj, info, props = mic
-        volume, muted = _props_volume(info)
-        snap.channels["mic"] = NodeState(
-            node_id=int(obj["id"]),
-            serial=int(props.get("object.serial") or 0),
-            name=mic_name,
-            description=str(props.get("node.description") or "Microphone"),
-            volume=volume,
-            muted=muted,
-        )
-
     routes = _sink_input_map()
     grouped: dict[str, AppStream] = {}
     for obj, info, props in nodes:
@@ -250,6 +220,8 @@ def snapshot() -> Snapshot:
         existing = grouped.get(key)
         if existing is not None:
             existing.members.append(int(obj["id"]))
+            if name and name not in existing.node_names:
+                existing.node_names.append(name)
             continue
         grouped[key] = AppStream(
             key=key,
@@ -262,6 +234,7 @@ def snapshot() -> Snapshot:
             binary=binary,
             channel=serial_to_channel.get(routes.get(serial, -1), ""),
             members=[int(obj["id"])],
+            node_names=[name] if name else [],
         )
 
     snap.apps = sorted(grouped.values(), key=lambda a: a.name.lower())
@@ -280,6 +253,33 @@ def set_mute(node_id: int, muted: bool) -> None:
 
 def move_stream(serial: int, sink_name: str) -> None:
     _run(["pactl", "move-sink-input", str(serial), sink_name])
+
+
+def _eq_payload(state: eqmod.ChannelEq) -> str:
+    """Props "params" list; a disabled EQ is written as an effective bypass."""
+    state = state.normalized()
+    active = state.enabled
+    mult = eqmod.db_to_linear(state.preamp) if active else 1.0
+    parts = [f'"{eqmod.PREAMP_NAME}:Mult" {mult:.6f}']
+    for index in range(eqmod.BAND_COUNT):
+        gain = state.gains[index] if active else 0.0
+        freq = eqmod.BAND_FREQS[index]
+        parts.append(
+            f'"{eqmod.band_name(index)}:Freq" {freq:.1f} '
+            f'"{eqmod.band_name(index)}:Q" {eqmod.BAND_Q:.2f} '
+            f'"{eqmod.band_name(index)}:Gain" {gain:.2f}'
+        )
+    return "{ params = [ " + " ".join(parts) + " ] }"
+
+
+def set_channel_eq(node_id: int, state: eqmod.ChannelEq) -> bool:
+    """Push preamp and band gains into a channel's filter-chain sink node.
+
+    The Props "params" values reach the DSP even though pw-cli's readback of
+    that param can show stale values — verified with a signal-level test.
+    """
+    out = _run(["pw-cli", "set-param", str(node_id), "Props", _eq_payload(state)])
+    return bool(out)
 
 
 def retarget_channel_outputs(snap: Snapshot) -> None:

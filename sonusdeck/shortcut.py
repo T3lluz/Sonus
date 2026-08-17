@@ -26,11 +26,6 @@ KWIN_SCRIPT_SRC = Path(__file__).resolve().parent.parent / "kwin" / KWIN_PLUGIN
 KWIN_SCRIPT_DST = Path.home() / ".local/share/kwin/scripts" / KWIN_PLUGIN
 _TIMEOUT = 5.0
 
-SHORTCUTS_FILE = "kglobalshortcutsrc"
-FRIENDLY = f"{APP_NAME} Toggle"
-ACTION_ID = [DESKTOP_PATH.name, APP_NAME, "_launch", "Toggle"]
-_TIMEOUT = 5.0
-
 
 def _run(args: list[str], timeout: float = _TIMEOUT) -> tuple[bool, str]:
     if shutil.which(args[0]) is None:

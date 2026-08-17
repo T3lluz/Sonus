@@ -41,8 +41,24 @@ THUMB_W = 22.0
 THUMB_H = 40.0
 TRACK_W = 10.0
 
+# EQ affordance in the top-right corner of category strips.
+EQ_ICON_SIZE = 26
+EQ_ICON_PAD = 9
+
+# Right block: category bins stacked in a left column, master container
+# beside them so the app faders get the full height.
+BIN_GAP = 10
+BIN_COL_W = 170
+MC_X = BIN_COL_W + BIN_GAP
+MC_H = STRIP_H
+MC_PAD = 12
+MC_LABEL_H = 24
+BIN_CHIP = 28
+BIN_CHIP_GAP = 6
+
 APP_STRIP_W = STRIP_W
-APPS_VISIBLE = 4
+APPS_MIN = 1
+EMPTY_MASTER_INNER = 200
 DIVIDER_W = 18
 BAR_H = 44
 TOP_PAD = 18
@@ -56,9 +72,19 @@ SETTINGS_W = 400
 SETTINGS_CARD_R = 12
 WINDOW_R = 20
 
-CHANNEL_COUNT = 6
+# Full-page equaliser view.
+EQ_MARGIN = 24
+EQ_LEFT_COL = 260
+EQ_BANDS_X = EQ_MARGIN + EQ_LEFT_COL + 40
+EQ_TOPBAR_H = 56
+EQ_SLIDER_H = 356
+EQ_THUMB_W = 26.0
+EQ_THUMB_H = 14.0
+EQ_TRACK_W = 6.0
+
+CHANNEL_COUNT = 5
 SONAR_BLOCK_W = CHANNEL_COUNT * STRIP_W + (CHANNEL_COUNT - 1) * STRIP_GAP
-APPS_VIEW_W = APPS_VISIBLE * APP_STRIP_W + (APPS_VISIBLE - 1) * STRIP_GAP
+APPS_VIEW_W = MC_X + MC_PAD * 2 + APPS_MIN * APP_STRIP_W
 WIN_W = SIDE_PAD * 2 + SONAR_BLOCK_W + DIVIDER_W + APPS_VIEW_W
 WIN_H = TOP_PAD + BAR_H + HEADER_GAP + STRIP_H + BOT_PAD
 PAGE_W = WIN_W - SIDE_PAD * 2
@@ -68,6 +94,7 @@ RISE_PX = 10
 SHOW_MS = 180
 HIDE_MS = 140
 DRAWER_MS = 220
+PAGE_MS = 260
 
 
 # Segoe UI is not on Linux; pick the closest grotesque that is actually installed.

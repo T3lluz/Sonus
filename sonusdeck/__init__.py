@@ -1,15 +1,14 @@
 """SonusDeck: a hotkey volume panel for PipeWire.
 
-Layout mirrors SonarDeck so the two stay easy to compare:
-
     config.py    identity, channel list, settings
     theme.py     colours, metrics, fonts
-    graph.py     virtual Game/Chat/Media/Aux sinks (PipeWire loopbacks)
+    graph.py     virtual Game/Chat/Media/Aux sinks (PipeWire filter-chains)
     pipewire.py  reading and driving the graph
-    effects.py   EasyEffects, the per-device equaliser
+    effects.py   EasyEffects post-mix slot (no second EQ)
+    eq.py        per-category 10-band equaliser
     shortcut.py  KDE global shortcut registration
     ipc.py       single instance and the toggle channel
-    ui/          strip, appmixer, widgets, panel
+    ui/          strip, appmixer, eqpanel, widgets, panel
     app.py       entry point
 """
 

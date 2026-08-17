@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QBrush, QColor, QFontMetrics, QIcon, QPainter, QPainterPath, QPen, QPixmap,
 )
@@ -22,13 +23,71 @@ def _no_pen(painter: QPainter) -> None:
     painter.setPen(Qt.PenStyle.NoPen)
 
 
+def draw_eq_glyph(painter: QPainter, rect: QRectF, color: str) -> None:
+    """Three mini-faders, the equaliser affordance."""
+    pen = QPen(QColor(color), 1.9)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    pad_x = rect.width() * 0.26
+    top = rect.top() + rect.height() * 0.24
+    bottom = rect.bottom() - rect.height() * 0.24
+    knots = (0.34, 0.72, 0.48)
+    for i in range(3):
+        x = rect.left() + pad_x + i * (rect.width() - pad_x * 2) / 2
+        painter.drawLine(QPointF(x, top), QPointF(x, bottom))
+    _no_pen(painter)
+    painter.setBrush(QBrush(QColor(color)))
+    for i, k in enumerate(knots):
+        x = rect.left() + pad_x + i * (rect.width() - pad_x * 2) / 2
+        y = top + (bottom - top) * k
+        painter.drawEllipse(QPointF(x, y), 2.6, 2.6)
+
+
+@dataclass(frozen=True)
+class StripMetrics:
+    """Vertical layout of a fader strip. Defaults match the channel strips."""
+
+    height: int = T.STRIP_H
+    icon_size: int = T.ICON_SIZE
+    icon_y: int = T.ICON_Y
+    label_y: int = T.LABEL_Y
+    pct_y: int = T.PCT_Y
+    fader_top: int = T.FADER_TOP
+    fader_bot: int = T.FADER_BOT
+    mute_size: int = T.MUTE_SIZE
+    mute_y: int = T.MUTE_Y0
+    thumb_w: float = T.THUMB_W
+    thumb_h: float = T.THUMB_H
+    track_w: float = T.TRACK_W
+    label_pt: int = 10
+    pct_pt: int = 9
+
+
+CHANNEL_METRICS = StripMetrics()
+
+# App strips inside the master container: nearly full height, long faders.
+APP_METRICS = StripMetrics(
+    height=476, icon_size=38, icon_y=36, label_y=74, pct_y=94,
+    fader_top=130, fader_bot=400, mute_size=38, mute_y=424,
+    thumb_w=20.0, thumb_h=36.0, track_w=9.0, label_pt=10, pct_pt=9,
+)
+
+
 class Strip(QWidget):
-    """One vertical fader with icon, label, percentage and mute button."""
+    """One vertical fader with icon, label, percentage and mute button.
+
+    App strips (compact, inside the master container) can additionally be
+    picked up and dragged onto a category bin: dragMoved/dragReleased carry
+    global cursor positions for the drop handling in the mixer.
+    """
 
     volumeChanged = pyqtSignal(str, float)
     muteToggled = pyqtSignal(str)
     scrolled = pyqtSignal(int)
     channelClicked = pyqtSignal(str)
+    eqClicked = pyqtSignal(str)
+    dragMoved = pyqtSignal(str, QPoint)
+    dragReleased = pyqtSignal(str, QPoint)
 
     def __init__(
         self,
@@ -39,6 +98,8 @@ class Strip(QWidget):
         width: int = T.STRIP_W,
         app: bool = False,
         icon_key: str = "",
+        eq_icon: bool = False,
+        metrics: StripMetrics | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -48,7 +109,8 @@ class Strip(QWidget):
         self.app = app
         self.icon_key = icon_key or key
         self.strip_w = width
-        self.setFixedSize(width, T.STRIP_H)
+        self.m = metrics or (APP_METRICS if app else CHANNEL_METRICS)
+        self.setFixedSize(width, self.m.height)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -60,18 +122,27 @@ class Strip(QWidget):
         self.interact = False
         self._interact_until = 0.0
         self._mute_hover = False
-        self._thumb_w = T.THUMB_W
-        self._thumb_h = T.THUMB_H
+        self._thumb_w = self.m.thumb_w
+        self._thumb_h = self.m.thumb_h
         self._pixmap: QPixmap | None = None
         self._allow_scroll_through = app
-        self.route_key = ""
-        self.route_label = "ASSIGN"
-        self.route_accent = T.DIM
-        pill_w = width - 28
-        self._route_rect = QRectF((width - pill_w) / 2, T.PCT_Y + 16, pill_w, 22)
+        self.fader_top = float(self.m.fader_top)
+        self.fader_bot = float(self.m.fader_bot)
 
-        mx = (width - T.MUTE_SIZE) / 2
-        self._mute_rect = QRectF(mx, T.MUTE_Y0, T.MUTE_SIZE, T.MUTE_SIZE)
+        self._maybe_drag = False
+        self._app_drag = False
+        self._press_global = QPoint()
+
+        self.eq_icon = eq_icon
+        self.eq_active = False
+        self._eq_hover = False
+        self._eq_rect = QRectF(
+            width - T.EQ_ICON_SIZE - T.EQ_ICON_PAD, T.EQ_ICON_PAD,
+            T.EQ_ICON_SIZE, T.EQ_ICON_SIZE,
+        )
+
+        mx = (width - self.m.mute_size) / 2
+        self._mute_rect = QRectF(mx, self.m.mute_y, self.m.mute_size, self.m.mute_size)
 
     # ----- state -------------------------------------------------------
 
@@ -100,13 +171,15 @@ class Strip(QWidget):
         if changed:
             self.update()
 
-    def set_route(self, key: str, label: str, accent: str) -> None:
-        if (self.route_key, self.route_label, self.route_accent) == (key, label, accent):
-            return
-        self.route_key = key
-        self.route_label = label
-        self.route_accent = accent
-        self.update()
+    def set_accent(self, accent: str) -> None:
+        if accent != self.accent:
+            self.accent = accent
+            self.update()
+
+    def set_eq_active(self, active: bool) -> None:
+        if active != self.eq_active:
+            self.eq_active = active
+            self.update()
 
     def reset_display(self) -> None:
         self.display = 0.0
@@ -125,8 +198,8 @@ class Strip(QWidget):
         else:
             self.display = self.target
         live = self.dragging or self.interact
-        want_w = T.THUMB_W + (2.0 if live else 0.0)
-        want_h = T.THUMB_H + (4.0 if live else 0.0)
+        want_w = self.m.thumb_w + (2.0 if live else 0.0)
+        want_h = self.m.thumb_h + (4.0 if live else 0.0)
         self._thumb_w += (want_w - self._thumb_w) * 0.32
         self._thumb_h += (want_h - self._thumb_h) * 0.32
         if moving or live or abs(self._thumb_w - want_w) > 0.04:
@@ -137,8 +210,8 @@ class Strip(QWidget):
     # ----- input -------------------------------------------------------
 
     def _value_at(self, y: float) -> float:
-        span = max(1.0, T.FADER_BOT - T.FADER_TOP)
-        return max(0.0, min(1.0, 1.0 - (y - T.FADER_TOP) / span))
+        span = max(1.0, self.fader_bot - self.fader_top)
+        return max(0.0, min(1.0, 1.0 - (y - self.fader_top) / span))
 
     def _apply_from_pointer(self, y: float) -> None:
         self.volume = self._value_at(y)
@@ -154,8 +227,14 @@ class Strip(QWidget):
         if self._mute_rect.contains(pos):
             self.muteToggled.emit(self.key)
             return
-        if self.app and pos.y() < T.FADER_TOP - 8:
-            self.channelClicked.emit(self.key)
+        if self.eq_icon and self._eq_rect.contains(pos):
+            self.eqClicked.emit(self.key)
+            return
+        if self.app and pos.y() < self.fader_top - 6:
+            # Header grab: becomes a drag onto a category bin, or a click.
+            self._maybe_drag = True
+            self._app_drag = False
+            self._press_global = event.globalPosition().toPoint()
             return
         if self.muted:
             self.muteToggled.emit(self.key)
@@ -165,28 +244,53 @@ class Strip(QWidget):
 
     def mouseMoveEvent(self, event) -> None:
         pos = event.position()
+        if self._maybe_drag:
+            global_pos = event.globalPosition().toPoint()
+            if not self._app_drag:
+                delta = global_pos - self._press_global
+                if abs(delta.x()) + abs(delta.y()) > 10:
+                    self._app_drag = True
+            if self._app_drag:
+                self.dragMoved.emit(self.key, global_pos)
+            return
         if self.dragging:
             self._apply_from_pointer(pos.y())
             return
+        repaint = False
         hover = self._mute_rect.contains(pos)
         if hover != self._mute_hover:
             self._mute_hover = hover
+            repaint = True
+        eq_hover = self.eq_icon and self._eq_rect.contains(pos)
+        if eq_hover != self._eq_hover:
+            self._eq_hover = eq_hover
+            repaint = True
+        if repaint:
             self.update()
 
     def mouseReleaseEvent(self, event) -> None:
+        if self._maybe_drag:
+            if self._app_drag:
+                self.dragReleased.emit(self.key, event.globalPosition().toPoint())
+            else:
+                self.channelClicked.emit(self.key)
+            self._maybe_drag = False
+            self._app_drag = False
+            return
         if self.dragging:
             self.dragging = False
             self.interact = False
             self.volumeChanged.emit(self.key, self.volume)
 
     def leaveEvent(self, event) -> None:
-        if self._mute_hover:
+        if self._mute_hover or self._eq_hover:
             self._mute_hover = False
+            self._eq_hover = False
             self.update()
 
     def wheelEvent(self, event) -> None:
         delta = event.angleDelta().y()
-        inside_fader = T.FADER_TOP <= event.position().y() <= T.FADER_BOT
+        inside_fader = self.fader_top <= event.position().y() <= self.fader_bot
         if self._allow_scroll_through and not inside_fader:
             self.scrolled.emit(delta)
             event.accept()
@@ -211,13 +315,14 @@ class Strip(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         _no_pen(painter)
 
+        m = self.m
         painter.setBrush(QBrush(QColor(T.PANEL)))
-        painter.drawRoundedRect(QRectF(0, 0, self.strip_w, T.STRIP_H), T.CARD_R, T.CARD_R)
+        painter.drawRoundedRect(QRectF(0, 0, self.strip_w, m.height), T.CARD_R, T.CARD_R)
 
         cx = self.strip_w / 2
         head = T.DIM if self.muted else (T.TEXT if self.app else self.accent)
 
-        icon_rect = QRectF(cx - T.ICON_SIZE / 2, T.ICON_Y - T.ICON_SIZE / 2, T.ICON_SIZE, T.ICON_SIZE)
+        icon_rect = QRectF(cx - m.icon_size / 2, m.icon_y - m.icon_size / 2, m.icon_size, m.icon_size)
         if self._pixmap is not None:
             painter.setOpacity(0.45 if self.muted else 1.0)
             painter.drawPixmap(icon_rect.toRect(), self._pixmap)
@@ -225,44 +330,38 @@ class Strip(QWidget):
         else:
             icons.draw_channel(painter, self.icon_key, icon_rect, head)
 
-        painter.setFont(T.semibold(10))
+        painter.setFont(T.semibold(m.label_pt))
         metrics = QFontMetrics(painter.font())
         text = metrics.elidedText(self.label, Qt.TextElideMode.ElideRight, self.strip_w - 24)
         painter.setPen(QColor(head))
         painter.drawText(
-            QRectF(0, T.LABEL_Y - 12, self.strip_w, 24),
+            QRectF(0, m.label_y - 12, self.strip_w, 24),
             Qt.AlignmentFlag.AlignCenter, text,
         )
 
-        painter.setFont(T.font(9))
+        painter.setFont(T.font(m.pct_pt))
         painter.setPen(QColor(T.DIM))
         painter.drawText(
-            QRectF(0, T.PCT_Y - 11, self.strip_w, 22),
+            QRectF(0, m.pct_y - 11, self.strip_w, 22),
             Qt.AlignmentFlag.AlignCenter, f"{int(round(self.display * 100))}%",
         )
 
-        if self.app:
-            _no_pen(painter)
-            assigned = bool(self.route_key)
-            painter.setBrush(QBrush(QColor(self.route_accent if assigned else T.MUTE_BG)))
-            painter.drawRoundedRect(self._route_rect, 11, 11)
-            painter.setFont(T.semibold(8))
-            painter.setPen(QColor("#1A1F23" if assigned else T.TEXT))
-            painter.drawText(self._route_rect, Qt.AlignmentFlag.AlignCenter, self.route_label)
+        if self.eq_icon:
+            self._paint_eq_icon(painter)
 
         fill_color = T.FILL_MUTED if self.muted else self.accent
-        cy = T.FADER_BOT - (T.FADER_BOT - T.FADER_TOP) * self.display
+        cy = self.fader_bot - (self.fader_bot - self.fader_top) * self.display
 
-        pen = QPen(QColor(T.TRACK), T.TRACK_W)
+        pen = QPen(QColor(T.TRACK), m.track_w)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
-        painter.drawLine(QPointF(cx, T.FADER_TOP), QPointF(cx, T.FADER_BOT))
+        painter.drawLine(QPointF(cx, self.fader_top), QPointF(cx, self.fader_bot))
 
-        if T.FADER_BOT - cy > 0.5:
-            pen = QPen(QColor(fill_color), T.TRACK_W)
+        if self.fader_bot - cy > 0.5:
+            pen = QPen(QColor(fill_color), m.track_w)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
-            painter.drawLine(QPointF(cx, cy), QPointF(cx, T.FADER_BOT))
+            painter.drawLine(QPointF(cx, cy), QPointF(cx, self.fader_bot))
 
         _no_pen(painter)
         tw, th = self._thumb_w, self._thumb_h
@@ -282,17 +381,30 @@ class Strip(QWidget):
             glyph = T.MUTE_FG_HOVER if self._mute_hover else T.MUTE_FG
         else:
             glyph = T.TEXT
-        size = 22.0
+        size = self.m.mute_size * 0.52
         icons.draw_speaker(
             painter,
             QRectF(
-                self._mute_rect.x() + (T.MUTE_SIZE - size) / 2,
-                self._mute_rect.y() + (T.MUTE_SIZE - size) / 2,
+                self._mute_rect.x() + (self.m.mute_size - size) / 2,
+                self._mute_rect.y() + (self.m.mute_size - size) / 2,
                 size, size,
             ),
             glyph, self.muted,
         )
         painter.end()
+
+    def _paint_eq_icon(self, painter: QPainter) -> None:
+        """Small mini-fader glyph opening the category equaliser."""
+        rect = self._eq_rect
+        _no_pen(painter)
+        if self._eq_hover:
+            painter.setBrush(QBrush(QColor(T.MUTE_HOVER)))
+            painter.drawRoundedRect(rect, 7, 7)
+        elif self.eq_active:
+            painter.setBrush(QBrush(QColor(T.MUTE_BG)))
+            painter.drawRoundedRect(rect, 7, 7)
+        color = self.accent if (self.eq_active or self._eq_hover) else T.DIM
+        draw_eq_glyph(painter, rect, color)
 
 
 class Toggle(QWidget):

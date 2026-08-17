@@ -10,16 +10,18 @@ from PyQt6.QtCore import (
     QThread, QTimer, Qt, pyqtSignal,
 )
 from PyQt6.QtGui import QBrush, QColor, QCursor, QGuiApplication, QPainter
-from PyQt6.QtWidgets import QLabel, QMenu, QWidget
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel, QMenu, QWidget
 
 from .. import effects, pipewire, shortcut
+from .. import eq as eqmod
 from .. import theme as T
 from ..config import (
-    APP_NAME, CHANNELS, ROUTABLE, save_settings, set_autostart,
+    APP_NAME, CHANNELS, ROUTABLE, SINK_CHANNELS, save_settings, set_autostart,
 )
 from ..graph import GraphProcess
 from ..pipewire import Snapshot
 from .appmixer import AppMixer
+from .eqpanel import EqPanel
 from .widgets import AppsMark, BrandMark, Card, ChipButton, IconButton, Strip, Toggle
 
 
@@ -84,6 +86,8 @@ class Poller(QThread):
 
 
 class Panel(QWidget):
+    statusText = pyqtSignal(str)
+
     def __init__(self, settings: dict, graph: GraphProcess) -> None:
         super().__init__(None)
         self.settings = settings
@@ -95,9 +99,14 @@ class Panel(QWidget):
         self._apps_w = T.APPS_VIEW_W
         self._capturing = False
         self._drawer_open = False
+        self._eq_open = False
         self._drag_origin: QPoint | None = None
         self._routed: set[int] = set()
         self._pool = ThreadPoolExecutor(max_workers=3)
+
+        self._eq_keys = tuple(c.key for c in SINK_CHANNELS)
+        self._eqs = eqmod.load_all(settings, self._eq_keys)
+        self._eq_applied: dict[str, tuple] = {}
 
         self.setWindowTitle(APP_NAME)
         self.setWindowFlags(
@@ -112,9 +121,11 @@ class Panel(QWidget):
         self._build_header()
         self._build_strips()
         self._build_drawer()
+        self._build_eq_panel()
 
         self._anim: QParallelAnimationGroup | None = None
         self._drawer_anim: QPropertyAnimation | None = None
+        self._eq_anim: QParallelAnimationGroup | None = None
 
         self.frame_timer = QTimer(self)
         self.frame_timer.setInterval(16)
@@ -124,6 +135,18 @@ class Panel(QWidget):
         self.flush_timer.setInterval(40)
         self.flush_timer.setSingleShot(True)
         self.flush_timer.timeout.connect(self._flush_pending)
+
+        # Live EQ pushes are cheap; persisting and mirroring to EasyEffects
+        # waits until the sliders settle.
+        self.eq_apply_timer = QTimer(self)
+        self.eq_apply_timer.setInterval(60)
+        self.eq_apply_timer.setSingleShot(True)
+        self.eq_apply_timer.timeout.connect(self._flush_eq)
+
+        self.eq_persist_timer = QTimer(self)
+        self.eq_persist_timer.setInterval(800)
+        self.eq_persist_timer.setSingleShot(True)
+        self.eq_persist_timer.timeout.connect(self._persist_eq)
 
         self.poller = Poller(self)
         self.poller.updated.connect(self._on_snapshot)
@@ -146,6 +169,7 @@ class Panel(QWidget):
         self.status.setFont(T.font(9))
         self.status.setStyleSheet(f"color: {T.DIM}; background: transparent;")
         self.status.setFixedWidth(280)
+        self.statusText.connect(self.status.setText)
         self.status.move(
             T.SIDE_PAD + 36 + self.title.width() + 12,
             y + (T.BAR_H - 16) // 2,
@@ -184,9 +208,16 @@ class Panel(QWidget):
         self.strips: dict[str, Strip] = {}
         x = T.SIDE_PAD
         for index, channel in enumerate(CHANNELS):
-            strip = Strip(channel.key, channel.label, channel.accent, parent=self)
+            strip = Strip(
+                channel.key, channel.label, channel.accent,
+                eq_icon=channel.kind == "sink", parent=self,
+            )
             strip.volumeChanged.connect(self._on_channel_volume)
             strip.muteToggled.connect(self._on_channel_mute)
+            strip.eqClicked.connect(self._on_eq_clicked)
+            state = self._eqs.get(channel.key)
+            if state is not None:
+                strip.set_eq_active(state.enabled and not state.is_flat())
             strip.move(x, top)
             self.strips[channel.key] = strip
             x += T.STRIP_W + (T.STRIP_GAP if index < len(CHANNELS) - 1 else 0)
@@ -195,6 +226,7 @@ class Panel(QWidget):
         self.app_mixer.volumeChanged.connect(self._on_app_volume)
         self.app_mixer.muteToggled.connect(self._on_app_mute)
         self.app_mixer.routeRequested.connect(self.show_route_menu)
+        self.app_mixer.assignRequested.connect(self.route_app)
         self.app_mixer.move(T.SIDE_PAD + T.SONAR_BLOCK_W + T.DIVIDER_W, top)
 
     def _build_drawer(self) -> None:
@@ -220,8 +252,8 @@ class Panel(QWidget):
 
         y = 62
         self.autostart_toggle, y = self._settings_row(
-            y, "Start with session",
-            "Launch hidden when you log in.",
+            y, "Start with system",
+            "Launch hidden when the system starts.",
             bool(self.settings.get("autostart", True)),
             self._on_autostart,
         )
@@ -271,7 +303,9 @@ class Panel(QWidget):
         y += 48
 
         eq_note = QLabel(
-            "Equalisation lives in EasyEffects. Open it from the header and save an Autoload preset per device.",
+            "Each category has its own equaliser: click the sliders icon on Game, "
+            "Chat, Media or Aux. EasyEffects stays a post-mix slot for extra "
+            "effects — its equaliser is left off so the two don't stack.",
             self.drawer,
         )
         eq_note.setFont(T.font(9))
@@ -279,6 +313,18 @@ class Panel(QWidget):
         eq_note.setWordWrap(True)
         eq_note.setFixedWidth(T.SETTINGS_W - 40)
         eq_note.move(20, y)
+
+    def _build_eq_panel(self) -> None:
+        """The EQ is a full page sliding over the deck, not a drawer."""
+        self.eq_panel = EqPanel(self)
+        self.eq_panel.set_page_width(self._page_width())
+        self.eq_panel.move(self.width(), self._content_top())
+        self.eq_panel.hide()
+        self._eq_fx = QGraphicsOpacityEffect(self.eq_panel)
+        self._eq_fx.setOpacity(1.0)
+        self.eq_panel.setGraphicsEffect(self._eq_fx)
+        self.eq_panel.eqChanged.connect(self._on_eq_changed)
+        self.eq_panel.backRequested.connect(self._close_eq_panel)
 
     def _settings_row(self, y: int, title: str, hint: str, value: bool, handler):
         card = Card(parent=self.drawer)
@@ -320,13 +366,27 @@ class Panel(QWidget):
     def _frame_width(self) -> int:
         return T.SIDE_PAD * 2 + T.SONAR_BLOCK_W + T.DIVIDER_W + self._apps_w
 
+    def _content_top(self) -> int:
+        return T.TOP_PAD + T.BAR_H + T.HEADER_GAP
+
+    def _page_width(self) -> int:
+        return self._frame_width() - T.SIDE_PAD * 2
+
     def _apps_width_for(self, count: int) -> int:
         screen = self._screen_geometry()
         chrome = T.SIDE_PAD * 2 + T.SONAR_BLOCK_W + T.DIVIDER_W
-        max_w = max(T.APPS_VIEW_W, screen.width() - 72 - chrome)
-        max_n = max(T.APPS_VISIBLE, int((max_w + T.STRIP_GAP) // (T.APP_STRIP_W + T.STRIP_GAP)))
-        show = T.APPS_VISIBLE if count <= 0 else min(max(count, T.APPS_VISIBLE), max_n)
-        return show * T.APP_STRIP_W + max(0, show - 1) * T.STRIP_GAP
+        inner_chrome = T.MC_X + T.MC_PAD * 2
+        max_inner = max(T.APP_STRIP_W, screen.width() - 72 - chrome - inner_chrome)
+        if count <= 0:
+            inner = min(T.EMPTY_MASTER_INNER, max_inner)
+        else:
+            needed = count * T.APP_STRIP_W + max(0, count - 1) * T.STRIP_GAP
+            if needed <= max_inner:
+                inner = needed
+            else:
+                n = max(1, int((max_inner + T.STRIP_GAP) // (T.APP_STRIP_W + T.STRIP_GAP)))
+                inner = n * T.APP_STRIP_W + max(0, n - 1) * T.STRIP_GAP
+        return inner_chrome + inner
 
     def _screen_geometry(self) -> QRect:
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
@@ -334,26 +394,29 @@ class Panel(QWidget):
 
     def _resize_for_apps(self, count: int) -> None:
         width = self._apps_width_for(count)
-        if width == self._apps_w:
+        new_w = T.SIDE_PAD * 2 + T.SONAR_BLOCK_W + T.DIVIDER_W + width
+        if width == self._apps_w and self.width() == new_w:
             return
-        centre = self.geometry().center()
+        left, top = self.x(), self.y()
         self._apps_w = width
         self.app_mixer.set_view_width(width)
-        self.setFixedSize(self._frame_width(), T.WIN_H)
+        self.setFixedSize(new_w, T.WIN_H)
         self._place_header()
         if not self._drawer_open:
             self.drawer.move(self.width(), self.drawer.y())
         else:
             self.drawer.move(self.width() - T.SETTINGS_W, self.drawer.y())
-        self._move_to_centre(centre)
-
-    def _move_to_centre(self, centre: QPoint) -> None:
+        self.eq_panel.set_page_width(self._page_width())
+        if self._eq_open:
+            self.eq_panel.move(T.SIDE_PAD, self.eq_panel.y())
+        else:
+            self.eq_panel.move(self.width(), self.eq_panel.y())
         screen = self._screen_geometry()
-        x = centre.x() - self.width() // 2
-        y = centre.y() - self.height() // 2
-        x = max(screen.left(), min(x, screen.right() - self.width()))
-        y = max(screen.top(), min(y, screen.bottom() - self.height()))
-        self.move(x, y)
+        if left + new_w > screen.right():
+            left = max(screen.left(), screen.right() - new_w)
+        if left < screen.left():
+            left = screen.left()
+        self.move(left, top)
 
     def _restore_position(self) -> None:
         screen = self._screen_geometry()
@@ -383,6 +446,7 @@ class Panel(QWidget):
             strip.reset_display()
         self.app_mixer.reset_display()
         self._restore_position()
+        self._resize_for_apps(len(self._snapshot.apps))
 
         resting = self.pos()
         self.setWindowOpacity(0.0)
@@ -401,6 +465,9 @@ class Panel(QWidget):
             return
         if self._drawer_open:
             self._close_drawer(animate=False)
+        if self._eq_open:
+            self._close_eq_panel(animate=False)
+        self._persist_eq()
         self._stop_capture()
         self._remember_position()
         self.visible_now = False
@@ -465,6 +532,8 @@ class Panel(QWidget):
             self._open_drawer()
 
     def _open_drawer(self) -> None:
+        if self._eq_open:
+            self._close_eq_panel(animate=False)
         self._drawer_open = True
         self.drawer.show()
         self.drawer.raise_()
@@ -489,6 +558,115 @@ class Panel(QWidget):
         anim.finished.connect(lambda: setattr(self, "_drawer_anim", None))
         self._drawer_anim = anim
         anim.start()
+
+    # ----- equaliser -------------------------------------------------------
+
+    def _on_eq_clicked(self, key: str) -> None:
+        """EQ icon on a category strip opens that category's equaliser."""
+        if key not in self._eq_keys:
+            return
+        if self._eq_open and self.eq_panel.channel_key == key:
+            self._close_eq_panel()
+        else:
+            self._open_eq_panel(key)
+
+    def _open_eq_panel(self, key: str) -> None:
+        channel = next((c for c in SINK_CHANNELS if c.key == key), None)
+        if channel is None:
+            return
+        if self._drawer_open:
+            self._close_drawer(animate=False)
+        state = self._eqs.setdefault(key, eqmod.ChannelEq())
+        already_open = self._eq_open
+        self.eq_panel.set_page_width(self._page_width())
+        self.eq_panel.set_channel(key, channel.label, channel.accent, state)
+        self._eq_open = True
+        self.eq_panel.show()
+        self.eq_panel.raise_()
+        if already_open:
+            self.eq_panel.move(T.SIDE_PAD, self.eq_panel.y())
+        else:
+            # Slide the page in from the right edge while fading it in.
+            self.eq_panel.move(self.width(), self.eq_panel.y())
+            self._slide_eq(T.SIDE_PAD, 0.0, 1.0)
+
+    def _close_eq_panel(self, animate: bool = True) -> None:
+        if not self._eq_open:
+            return
+        self._eq_open = False
+        self._persist_eq()
+        if animate:
+            self._slide_eq(self.width(), 1.0, 0.0, hide_after=True)
+        else:
+            self.eq_panel.hide()
+            self.eq_panel.move(self.width(), self.eq_panel.y())
+
+    def _slide_eq(
+        self, target_x: int, from_op: float, to_op: float, hide_after: bool = False
+    ) -> None:
+        if self._eq_anim is not None:
+            self._eq_anim.stop()
+        group = QParallelAnimationGroup(self)
+        slide = QPropertyAnimation(self.eq_panel, b"pos", self)
+        slide.setDuration(T.PAGE_MS)
+        slide.setEasingCurve(
+            QEasingCurve.Type.InCubic if hide_after else QEasingCurve.Type.OutCubic
+        )
+        slide.setStartValue(self.eq_panel.pos())
+        slide.setEndValue(QPoint(target_x, self.eq_panel.y()))
+        group.addAnimation(slide)
+        fade = QPropertyAnimation(self._eq_fx, b"opacity", self)
+        fade.setDuration(T.PAGE_MS)
+        fade.setStartValue(from_op)
+        fade.setEndValue(to_op)
+        group.addAnimation(fade)
+
+        def finished() -> None:
+            self._eq_anim = None
+            if hide_after and not self._eq_open:
+                self.eq_panel.hide()
+                self._eq_fx.setOpacity(1.0)
+
+        group.finished.connect(finished)
+        self._eq_anim = group
+        group.start()
+
+    def _on_eq_changed(self, key: str) -> None:
+        self._eqs[key] = self.eq_panel.current_state()
+        state = self._eqs[key]
+        active = state.enabled and not state.is_flat()
+        strip = self.strips.get(key)
+        if strip is not None:
+            strip.set_eq_active(active)
+        self.eq_apply_timer.start()
+        self.eq_persist_timer.start()
+
+    def _flush_eq(self) -> None:
+        """Push the edited category EQ into its live filter-chain node."""
+        key = self.eq_panel.channel_key
+        state = self._eqs.get(key)
+        node = self._node_for(key)
+        if state is None or node is None:
+            return
+        self._eq_applied[key] = (node, state.signature())
+        self._pool.submit(pipewire.set_channel_eq, node, state)
+
+    def _persist_eq(self) -> None:
+        self.eq_persist_timer.stop()
+        eqmod.store_all(self.settings, self._eqs)
+        self._persist()
+
+    def _ensure_eq_applied(self, snap: Snapshot) -> None:
+        """Re-push saved EQs whenever a channel node (re)appears."""
+        for channel in SINK_CHANNELS:
+            node_state = snap.channels.get(channel.key)
+            state = self._eqs.get(channel.key)
+            if node_state is None or state is None:
+                continue
+            wanted = (node_state.node_id, state.signature())
+            if self._eq_applied.get(channel.key) != wanted:
+                self._eq_applied[channel.key] = wanted
+                self._pool.submit(pipewire.set_channel_eq, node_state.node_id, state)
 
     # ----- settings handlers ---------------------------------------------
 
@@ -532,7 +710,9 @@ class Panel(QWidget):
             self._capture_key(event)
             return
         if event.key() == Qt.Key.Key_Escape:
-            if self._drawer_open:
+            if self._eq_open:
+                self._close_eq_panel()
+            elif self._drawer_open:
                 self._close_drawer()
             else:
                 self.hide_panel()
@@ -582,6 +762,7 @@ class Panel(QWidget):
 
     def _on_snapshot(self, snap: Snapshot) -> None:
         self._snapshot = snap
+        self._ensure_eq_applied(snap)
         if not self.visible_now:
             return
         for channel in CHANNELS:
@@ -703,7 +884,7 @@ class Panel(QWidget):
             self._persist()
             target = self._snapshot.mix_target or self._snapshot.default_sink
             if target:
-                self._pool.submit(pipewire.move_stream, app.serial, target)
+                self._pool.submit(self._route_worker, app, target, False)
             return
         channel = next((c for c in ROUTABLE if c.key == channel_key), None)
         if channel is None:
@@ -711,7 +892,33 @@ class Panel(QWidget):
         routes[app.binary or app.key] = channel_key
         self.settings["routes"] = routes
         self._persist()
-        self._pool.submit(pipewire.move_stream, app.serial, channel.node_name)
+        self._pool.submit(self._route_worker, app, channel.node_name, True)
+
+    def _route_worker(self, app, sink: str, exclude: bool) -> None:
+        """Move a stream, keeping the EasyEffects exclude list in sync.
+
+        A running EasyEffects with "process all output streams" immediately
+        pulls every non-excluded stream back to easyeffects_sink, so assigned
+        apps must be on its exclude list. EasyEffects only reads the list at
+        startup, which forces a graceful restart when it changes while up.
+        """
+        names = app.node_names or [app.name]
+        restarted = False
+        try:
+            if exclude:
+                restarted = effects.apply_exclusions(names, [])
+            else:
+                restarted = effects.apply_exclusions([], names)
+            if restarted:
+                self.statusText.emit("Restarted EasyEffects (exclude list)")
+        except Exception:
+            pass
+        pipewire.move_stream(app.serial, sink)
+        if restarted:
+            # Sinks reappear over the first second after the relaunch;
+            # reassert the target once things settle.
+            time.sleep(1.2)
+            pipewire.move_stream(app.serial, sink)
 
     def show_route_menu(self, key: str, global_pos: QPoint) -> None:
         menu = QMenu(self)
@@ -756,6 +963,7 @@ class Panel(QWidget):
             self._remember_position()
 
     def closeEvent(self, event) -> None:
+        self._persist_eq()
         self.poller.stop()
         self._pool.shutdown(wait=False)
         super().closeEvent(event)

@@ -1,10 +1,10 @@
 # SonusDeck — a hotkey volume mixer for PipeWire
 #
-# One shortcut, six faders (Master / Game / Chat / Media / Aux / Mic) plus
+# One shortcut, five faders (Master / Game / Chat / Media / Aux) plus
 # every app, then back to the game. Styling is carried over from SonarDeck.
 #
-# Equalisation is not in this panel. EasyEffects is the app that owns EQ,
-# including a separate preset per output and input device.
+# Game, Chat, Media and Aux each have a 10-band EQ. EasyEffects stays
+# a post-mix slot for extra device-wide effects, without a second EQ.
 
 [project]
 name = "sonusdeck"

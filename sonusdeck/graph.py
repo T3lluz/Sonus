@@ -1,8 +1,13 @@
-"""Virtual Sonar-style channels, built from PipeWire loopbacks.
+"""Virtual Sonar-style channels, built from PipeWire filter-chains.
 
-Each channel is a sink apps can play into. Their outputs are mixed into
-EasyEffects when it is running, otherwise into the current hardware sink.
-Equalisation stays in EasyEffects — this graph only provides the channels.
+Each channel is a sink apps can play into, carrying its own 10-band
+parametric EQ (a preamp plus chained bq_peaking biquads). Channel outputs are
+mixed into EasyEffects when it is running, otherwise into the current
+hardware sink. EasyEffects is a post-mix slot for extra effects — not a
+second copy of the category EQ.
+
+The EQ values are baked into the generated config so a restart comes back in
+the saved state, and they are changed live via pw-cli (pipewire.set_channel_eq).
 """
 
 from __future__ import annotations
@@ -14,7 +19,10 @@ import subprocess
 import time
 from pathlib import Path
 
-from .config import CONFIG_DIR, GRAPH_CONF, GRAPH_CONF_PATH, SINK_CHANNELS
+from . import eq as eqmod
+from .config import (
+    CONFIG_DIR, GRAPH_CONF, GRAPH_CONF_PATH, SINK_CHANNELS, load_settings,
+)
 
 PID_PATH = CONFIG_DIR / "graph.pid"
 
@@ -41,12 +49,50 @@ context.modules = [
 FOOTER = "]\n"
 
 
-def _loopback(channel) -> str:
+def _eq_nodes(channel_eq: eqmod.ChannelEq) -> str:
+    """The filter graph: preamp -> band0 -> ... -> band9."""
+    state = channel_eq.normalized()
+    active = state.enabled
+    mult = eqmod.db_to_linear(state.preamp) if active else 1.0
+    parts = [
+        f'                    {{ type = builtin name = {eqmod.PREAMP_NAME} label = linear'
+        f' control = {{ "Mult" = {mult:.6f} "Add" = 0.0 }} }}'
+    ]
+    for index, freq in enumerate(eqmod.BAND_FREQS):
+        gain = state.gains[index] if active else 0.0
+        parts.append(
+            f'                    {{ type = builtin name = {eqmod.band_name(index)} label = bq_peaking'
+            f' control = {{ "Freq" = {freq:.1f} "Q" = {eqmod.BAND_Q:.2f} "Gain" = {gain:.2f} }} }}'
+        )
+    return "\n".join(parts)
+
+
+def _eq_links() -> str:
+    chain = [eqmod.PREAMP_NAME] + [eqmod.band_name(i) for i in range(eqmod.BAND_COUNT)]
+    return "\n".join(
+        f'                    {{ output = "{a}:Out" input = "{b}:In" }}'
+        for a, b in zip(chain, chain[1:])
+    )
+
+
+def _filter_chain(channel, channel_eq: eqmod.ChannelEq) -> str:
+    last = eqmod.band_name(eqmod.BAND_COUNT - 1)
     return f"""
-    {{ name = libpipewire-module-loopback
+    {{ name = libpipewire-module-filter-chain
         args = {{
             node.description = "{channel.description}"
-            audio.position = [ FL FR ]
+            media.name       = "{channel.description}"
+            audio.position   = [ FL FR ]
+            filter.graph = {{
+                nodes = [
+{_eq_nodes(channel_eq)}
+                ]
+                links = [
+{_eq_links()}
+                ]
+                inputs  = [ "{eqmod.PREAMP_NAME}:In" ]
+                outputs = [ "{last}:Out" ]
+            }}
             capture.props = {{
                 node.name        = "{channel.node_name}"
                 node.description = "{channel.description}"
@@ -65,14 +111,20 @@ def _loopback(channel) -> str:
 """
 
 
-def render_config() -> str:
-    body = "".join(_loopback(channel) for channel in SINK_CHANNELS)
+def render_config(eqs: dict[str, eqmod.ChannelEq] | None = None) -> str:
+    if eqs is None:
+        keys = tuple(channel.key for channel in SINK_CHANNELS)
+        eqs = eqmod.load_all(load_settings(), keys)
+    body = "".join(
+        _filter_chain(channel, eqs.get(channel.key) or eqmod.ChannelEq())
+        for channel in SINK_CHANNELS
+    )
     return HEADER + body + FOOTER
 
 
-def write_config() -> None:
+def write_config(eqs: dict[str, eqmod.ChannelEq] | None = None) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    GRAPH_CONF_PATH.write_text(render_config(), encoding="utf-8")
+    GRAPH_CONF_PATH.write_text(render_config(eqs), encoding="utf-8")
 
 
 def _read_pid() -> int | None:
@@ -148,8 +200,12 @@ class GraphProcess:
         if not self.available():
             self.error = "pipewire not found"
             return False
-        _reap_stale()
         write_config()
+        pid = _read_pid()
+        if pid and _pid_is_graph(pid) and _channels_visible():
+            self.error = ""
+            return True
+        _reap_stale()
         env = dict(os.environ)
         env["PIPEWIRE_CONFIG_DIR"] = str(CONFIG_DIR)
         try:
@@ -157,14 +213,14 @@ class GraphProcess:
                 ["pipewire", "-c", GRAPH_CONF],
                 env=env,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
         except OSError as exc:
             self.error = str(exc)
             return False
         PID_PATH.write_text(str(self.proc.pid), encoding="utf-8")
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + 4.0
         while time.monotonic() < deadline:
             if not self.running():
                 self.error = "graph exited immediately"
@@ -192,6 +248,21 @@ class GraphProcess:
     def restart(self) -> bool:
         self.stop()
         return self.start()
+
+
+def prepare() -> tuple[bool, str]:
+    """Bring up the virtual channels and keep EasyEffects from double-EQing.
+
+    Used by `sonusdeck --setup` and first launch. Safe to call repeatedly.
+    """
+    from . import effects
+
+    proc = GraphProcess()
+    ok = proc.start()
+    effects.ensure_passthrough()
+    if ok:
+        return True, "Game, Chat, Media and Aux are ready"
+    return False, proc.error or "could not start virtual channels"
 
 
 def _channels_visible() -> bool:

@@ -27,11 +27,20 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--quit", action="store_true", help="stop the running panel")
     parser.add_argument("--install-shortcut", action="store_true", help="register the global shortcut and exit")
     parser.add_argument("--no-graph", action="store_true", help="do not create virtual channels")
+    parser.add_argument(
+        "--setup", action="store_true",
+        help="create virtual channels and keep EasyEffects from double-EQing, then exit",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    if args.setup:
+        from .graph import prepare
+        ok, detail = prepare()
+        print(detail)
+        return 0 if ok else 1
     _select_platform()
 
     from PyQt6.QtWidgets import QApplication
@@ -72,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
     manage = bool(settings.get("manage_graph", True)) and not args.no_graph
     if manage:
         graph.start()
+        from . import effects
+        effects.ensure_passthrough()
 
     set_autostart(bool(settings.get("autostart", True)))
     write_launch_desktop()
