@@ -257,27 +257,22 @@ class Panel(QWidget):
 
         y = self._settings_caption(y + 14, "SHORTCUT")
         y = self._settings_note(
-            y,
-            f"{HOTKEY} toggles the panel. Rebind \u201c{APP_NAME} Toggle\u201d "
-            "in desktop shortcuts.",
+            y, f"{HOTKEY} toggles the panel. Rebind \u201c{APP_NAME} Toggle\u201d in system settings.",
         )
 
         y = self._settings_caption(y + 14, "EQUALIZER")
-        y = self._settings_note(
-            y,
-            "The sliders icon opens that category's EQ. No need for direct "
-            "EasyEffects tuning.",
-        )
+        y = self._settings_note(y, "The sliders icon opens that category's EQ.")
 
+        y = self._settings_caption(y + 14, "UPDATES")
         self._build_update_row(y)
 
     def _build_update_row(self, y: int) -> None:
         """Footer strip: which build is installed, and a chip to move it on."""
         pad = T.SETTINGS_PAD
-        height = 48
+        height = 44
         card = Card(parent=self.drawer)
         card.setFixedSize(T.SETTINGS_W - pad * 2, height)
-        card.move(pad, min(y, T.STRIP_H - 14 - height))
+        card.move(pad, min(y, T.STRIP_H - 12 - height))
 
         self._upd_label = QLabel("", card)
         self._upd_label.setFont(T.font(9))
