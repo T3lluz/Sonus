@@ -60,8 +60,9 @@ class AppStream:
     binary: str = ""
     channel: str = ""
     members: list[int] = field(default_factory=list)
-    # node.name of every member stream; EasyEffects' exclude list matches these.
-    node_names: list[str] = field(default_factory=list)
+    # Object serial of every member stream (== pactl sink-input index);
+    # moving an app means moving each of these.
+    serials: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -220,8 +221,8 @@ def snapshot() -> Snapshot:
         existing = grouped.get(key)
         if existing is not None:
             existing.members.append(int(obj["id"]))
-            if name and name not in existing.node_names:
-                existing.node_names.append(name)
+            if serial:
+                existing.serials.append(serial)
             continue
         grouped[key] = AppStream(
             key=key,
@@ -234,7 +235,7 @@ def snapshot() -> Snapshot:
             binary=binary,
             channel=serial_to_channel.get(routes.get(serial, -1), ""),
             members=[int(obj["id"])],
-            node_names=[name] if name else [],
+            serials=[serial] if serial else [],
         )
 
     snap.apps = sorted(grouped.values(), key=lambda a: a.name.lower())
@@ -282,24 +283,66 @@ def set_channel_eq(node_id: int, state: eqmod.ChannelEq) -> bool:
     return bool(out)
 
 
+def _sink_names_by_index() -> dict[int, str]:
+    """Sink pulse index (== object serial) -> node name."""
+    sinks: dict[int, str] = {}
+    for line in _run(["pactl", "list", "short", "sinks"]).splitlines():
+        parts = line.split()
+        if len(parts) >= 2:
+            try:
+                sinks[int(parts[0])] = parts[1]
+            except ValueError:
+                continue
+    return sinks
+
+
 def retarget_channel_outputs(snap: Snapshot) -> None:
     """Keep Game/Chat/Media/Aux feeding EasyEffects (or the hardware sink)."""
     target = snap.mix_target
     if not target or not snap.output_serials:
         return
     routes = _sink_input_map()
-    sink_serials: dict[int, str] = {}
-    for line in _run(["pactl", "list", "short", "sinks"]).splitlines():
-        parts = line.split()
-        if len(parts) >= 2:
-            try:
-                sink_serials[int(parts[0])] = parts[1]
-            except ValueError:
-                continue
+    sink_names = _sink_names_by_index()
     for serial in snap.output_serials.values():
-        current = sink_serials.get(routes.get(serial, -1), "")
+        current = sink_names.get(routes.get(serial, -1), "")
         if current != target:
             move_stream(serial, target)
+
+
+def enforce_app_routes(snap: Snapshot, routes: dict[str, str]) -> None:
+    """Keep every app stream where SonusDeck routed it.
+
+    Assigned apps play into their category sink; everything else is parked on
+    the mix target (easyeffects_sink while EasyEffects runs) so post-mix
+    effects still apply. Runs on every poll, so nothing — an EasyEffects
+    started later, session restores — can silently steal a stream.
+    """
+    if not snap.apps:
+        return
+    channel_sinks = {
+        channel.key: channel.node_name
+        for channel in SINK_CHANNELS
+        if channel.key in snap.channels
+    }
+    stream_sinks = _sink_input_map()
+    sink_names = _sink_names_by_index()
+    grabbing = snap.mix_target == EFFECTS_SINK
+    for app in snap.apps:
+        wanted = channel_sinks.get(routes.get(app.binary or app.key, ""))
+        for serial in app.serials or [app.serial]:
+            if not serial:
+                continue
+            current = sink_names.get(stream_sinks.get(serial, -1), "")
+            if wanted:
+                target = wanted
+            elif current.startswith(NODE_PREFIX) or (grabbing and current != EFFECTS_SINK):
+                # Unassigned: never leave a stream on a category sink, and
+                # feed it to EasyEffects when that is the mix target.
+                target = snap.mix_target
+            else:
+                continue
+            if current and current != target:
+                move_stream(serial, target)
 
 
 def channels_present() -> bool:

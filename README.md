@@ -8,7 +8,7 @@ Hotkey volume mixer for PipeWire. Linux counterpart to [SteelSeries Sonar](https
 curl -fsSL https://raw.githubusercontent.com/T3lluz/SonusDeck/main/install.sh | bash
 ```
 
-That one line installs dependencies, sets up the Game / Chat / Media / Aux sinks, keeps EasyEffects from stacking a second EQ on the mix, and starts the panel. Re-run it to update.
+That one line installs dependencies, sets up the Game / Chat / Media / Aux sinks, tames EasyEffects (no second EQ, no stream stealing), and starts the panel. Re-run it to update.
 
 From a checkout instead: `./install.sh`
 
@@ -30,7 +30,7 @@ The script puts the app in `~/.local/share/sonusdeck`, adds `sonusdeck` and `son
 
 EQ lives **on the category**, not in EasyEffects. SonusDeck owns Game / Chat / Media / Aux; EasyEffects is a post-mix slot and its equaliser is left off so the two don't stack. Double-click a band to zero it, scroll for 0.5 dB steps, toggle **EQ enabled** to bypass. Presets (Flat, Bass, Voice, Treble, Steps) apply a mild curve and pull the preamp down so boosts don't clip.
 
-Assigning an app also puts it on EasyEffects' **Excluded Apps** list (and unassigning removes it) — otherwise a running EasyEffects would pull the stream back to its own sink. EasyEffects only reads that list at startup, so SonusDeck restarts it quietly when the list changes; expect a short audio gap the first time an app is assigned.
+SonusDeck routes streams itself: assigned apps play into their category sink, everything else into EasyEffects, and the panel re-asserts those routes so nothing can silently steal a stream back. To make that possible, setup turns off EasyEffects' *process all output streams* once (a running EasyEffects is restarted quietly that one time). After that, assigning or moving an app between categories is a plain PipeWire retarget — instant, and audio keeps playing.
 
 Settings, app routes, and EQ curves: `~/.config/sonusdeck/settings.json`.
 

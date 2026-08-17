@@ -8,14 +8,16 @@ Three jobs:
 * Keep EasyEffects from stacking a second equaliser on that mix. Category EQ
   lives in the PipeWire filter-chain; loading a SonusDeck curve as the
   EasyEffects output preset would colour every stream twice.
-* Manage the EasyEffects "Excluded Apps" list (the [StreamOutputs] blocklist
-  in easyeffectsrc). While EasyEffects runs with "process all output streams",
-  it forces every non-excluded stream back to easyeffects_sink, which would
-  undo any assignment to a SonusDeck category. Assigned apps are therefore
-  added to the exclude list (matched by node.name, exactly like the checkbox
-  in the EasyEffects streams tab). EasyEffects only reads that file at
-  startup, so a graceful restart (quit via its own CLI, which saves state,
-  then relaunch hidden) is needed when the list changes while it runs.
+* Keep EasyEffects from stealing streams. With "process all output streams"
+  on, EasyEffects 8 re-targets every output stream to easyeffects_sink on
+  every PipeWire node event, which silently undoes any assignment to a
+  SonusDeck category (its file-based exclude list is not reliably honoured
+  for streams that appear after startup). ensure_manual_routing() turns that
+  setting off once; SonusDeck then owns stream routing itself and still parks
+  unassigned apps on easyeffects_sink so post-mix effects keep applying.
+  EasyEffects reads its config at startup only, so the one-time flip needs a
+  graceful restart (quit via its own CLI, which saves state, then relaunch
+  hidden) when it is running — after that, assignments never restart it.
 """
 
 from __future__ import annotations
@@ -32,8 +34,6 @@ from .config import SINK_CHANNELS
 
 FLATPAK_ID = "com.github.wwmm.easyeffects"
 _TIMEOUT = 2.0
-_RC_GROUP = "StreamOutputs"
-_RC_KEY = "blocklist"
 
 
 def _native() -> str | None:
@@ -226,9 +226,20 @@ def _rc_get(text: str, group: str, key: str) -> str:
 
 
 def _write_rc_key(path: Path, group: str, key: str, value: str) -> bool:
-    """Rewrite one KConfig key, preserving the rest of the file."""
+    """Rewrite one KConfig key, preserving the rest of the file.
+
+    Creates the file when missing so a first EasyEffects launch already
+    starts with the wanted value.
+    """
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"[{group}]\n{key}={value}\n", encoding="utf-8")
+        except OSError:
+            return False
+        return True
     except OSError:
         return False
     header = f"[{group}]"
@@ -359,66 +370,11 @@ def ensure_passthrough() -> bool:
     return _load_preset(load_name)
 
 
-# ----- excluded apps (the [StreamOutputs] blocklist) ---------------------
+# ----- keep EasyEffects from stealing routed streams ---------------------
 
 
-def _split_kconfig_list(raw: str) -> list[str]:
-    """KConfig StringList: comma separated, with backslash escapes."""
-    items: list[str] = []
-    current: list[str] = []
-    escaped = False
-    for ch in raw:
-        if escaped:
-            current.append(ch)
-            escaped = False
-        elif ch == "\\":
-            escaped = True
-        elif ch == ",":
-            items.append("".join(current))
-            current = []
-        else:
-            current.append(ch)
-    items.append("".join(current))
-    return [item for item in items if item]
-
-
-def _join_kconfig_list(items: list[str]) -> str:
-    return ",".join(
-        item.replace("\\", "\\\\").replace(",", "\\,") for item in items
-    )
-
-
-def _read_rc_blocklist(text: str) -> list[str]:
-    return _split_kconfig_list(_rc_get(text, _RC_GROUP, _RC_KEY))
-
-
-def read_excluded() -> list[str]:
-    for path in rc_paths():
-        try:
-            return _read_rc_blocklist(path.read_text(encoding="utf-8"))
-        except OSError:
-            continue
-    return []
-
-
-def _write_rc_blocklist(path: Path, entries: list[str]) -> bool:
-    return _write_rc_key(path, _RC_GROUP, _RC_KEY, _join_kconfig_list(entries))
-
-
-def _edit_exclusions(add: list[str], remove: list[str]) -> bool:
-    changed = False
-    for path in rc_paths():
-        if not path.exists():
-            continue
-        try:
-            current = _read_rc_blocklist(path.read_text(encoding="utf-8"))
-        except OSError:
-            continue
-        wanted = [entry for entry in current if entry not in remove]
-        wanted += [name for name in add if name not in wanted]
-        if wanted != current and _write_rc_blocklist(path, wanted):
-            changed = True
-    return changed
+_PIPELINES_GROUP = "EffectsPipelines"
+_PROCESS_ALL_KEY = "processAllOutputs"
 
 
 def _wait_stopped(timeout: float = 6.0) -> bool:
@@ -430,35 +386,58 @@ def _wait_stopped(timeout: float = 6.0) -> bool:
     return False
 
 
-def apply_exclusions(add: list[str], remove: list[str]) -> bool:
-    """Update the EasyEffects exclude list; restart it if it is running.
+def _quit_gracefully() -> None:
+    """Ask EasyEffects to quit through its own CLI so it saves its state."""
+    command = _command()
+    if command is None:
+        return
+    try:
+        subprocess.run(command + ["-q"], capture_output=True, timeout=10.0)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    _wait_stopped()
 
-    EasyEffects reads the list only at startup and rewrites the file when it
-    saves its own state, so the order matters: quit (it saves on exit), edit
-    the file, relaunch hidden. Returns True when a restart happened.
+
+def process_all_disabled() -> bool:
+    """True when every existing EasyEffects config already has the grab off."""
+    found = False
+    for path in rc_paths():
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        found = True
+        if _rc_get(text, _PIPELINES_GROUP, _PROCESS_ALL_KEY) != "false":
+            return False
+    return found
+
+
+def ensure_manual_routing() -> bool:
+    """Turn off "process all output streams" so assignments stick.
+
+    SonusDeck routes every app stream itself (assigned apps to their category
+    sink, the rest to easyeffects_sink), so EasyEffects must not re-grab them.
+    EasyEffects reads its config at startup only and rewrites it on exit, so
+    when the value has to change while it runs: quit (it saves state), write
+    the key, relaunch hidden. One-time migration; returns True on restart.
     """
-    add = [name for name in add if name]
-    remove = [name for name in remove if name and name not in add]
-    if not add and not remove:
+    if not installed():
         return False
-    current = read_excluded()
-    if all(name in current for name in add) and not any(n in current for n in remove):
+    if process_all_disabled():
         return False
 
     was_running = running()
     if was_running:
-        try:
-            command = _command()
-            if command is not None:
-                subprocess.run(
-                    command + ["-q"],
-                    capture_output=True, timeout=10.0,
-                )
-        except (OSError, subprocess.SubprocessError):
-            pass
-        _wait_stopped()
+        _quit_gracefully()
 
-    _edit_exclusions(add, remove)
+    # Update every existing config; create only the primary one so a first
+    # EasyEffects launch already starts with the grab disabled.
+    targets = [path for path in rc_paths() if path.exists()]
+    primary = rc_paths()[0]
+    if primary not in targets:
+        targets.append(primary)
+    for path in targets:
+        _write_rc_key(path, _PIPELINES_GROUP, _PROCESS_ALL_KEY, "false")
 
     if was_running:
         launch(hidden=True)

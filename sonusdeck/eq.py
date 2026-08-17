@@ -22,11 +22,12 @@ BAND_LABELS: tuple[str, ...] = (
     "32", "64", "125", "250", "500", "1K", "2K", "4K", "8K", "16K",
 )
 BAND_COUNT = len(BAND_FREQS)
-# Octave-spaced bells at Q=1.4–1.5 overlap enough that neighbouring boosts
-# stack. 2.0 keeps a graphic-EQ feel without the extra 2–3 dB at midpoints.
-BAND_Q = 2.0
-GAIN_LIMIT = 12.0  # dB, either direction
-PREAMP_LIMIT = 12.0
+# Octave-spaced bells: Q=1.4–1.5 stacks neighbouring boosts too hard, 2.0
+# feels thin. 1.8 gives enough overlap that a boost is clearly audible while
+# keeping a graphic-EQ feel.
+BAND_Q = 1.8
+GAIN_LIMIT = 15.0  # dB, either direction
+PREAMP_LIMIT = 15.0
 
 
 def band_name(index: int) -> str:
@@ -91,15 +92,16 @@ class ChannelEq:
         ).normalized()
 
 
-# Gain curves in band order 32..16K. Milder than a typical "gamer EQ" so a
-# single category doesn't clip or fight a device-wide chain. Applying a
-# preset also pulls the preamp down by the peak boost (see preset_preamp).
+# Gain curves in band order 32..16K. Assertive enough to hear, but still
+# short of a typical "gamer EQ" so a single category doesn't clip or fight a
+# device-wide chain. Applying a preset also pulls the preamp down by the peak
+# boost (see preset_preamp).
 PRESETS: dict[str, tuple[float, ...]] = {
     "Flat": (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-    "Bass": (4, 3, 2, 1, 0, 0, 0, 0, 0, 0),
-    "Voice": (-1.5, -1, 0, 0.5, 1.5, 2.5, 2.5, 2, 0.5, 0),
-    "Treble": (0, 0, 0, 0, 0, 0.5, 1.5, 2.5, 3, 3.5),
-    "Steps": (-2.5, -2, -0.5, 0, 0.5, 2, 3, 3, 1.5, 0.5),
+    "Bass": (5, 4, 2.5, 1, 0, 0, 0, 0, 0, 0),
+    "Voice": (-2, -1.5, 0, 0.5, 2, 3, 3, 2.5, 1, 0),
+    "Treble": (0, 0, 0, 0, 0, 0.5, 2, 3, 4, 4.5),
+    "Steps": (-3, -2.5, -0.5, 0, 0.5, 2.5, 3.5, 3.5, 2, 0.5),
 }
 
 

@@ -83,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         graph.start()
         from . import effects
         effects.ensure_passthrough()
+        effects.ensure_manual_routing()
 
     set_autostart(bool(settings.get("autostart", True)))
     write_launch_desktop()

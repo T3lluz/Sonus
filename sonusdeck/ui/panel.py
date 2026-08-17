@@ -57,13 +57,14 @@ def key_name(key: int) -> str:
 
 
 class Poller(QThread):
-    """Reads the graph off the UI thread."""
+    """Reads the graph off the UI thread and keeps routes asserted."""
 
     updated = pyqtSignal(object)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, routes_provider, parent=None) -> None:
         super().__init__(parent)
         self._running = True
+        self._routes = routes_provider
         self.active = False
 
     def run(self) -> None:
@@ -71,6 +72,7 @@ class Poller(QThread):
             try:
                 snap = pipewire.snapshot()
                 pipewire.retarget_channel_outputs(snap)
+                pipewire.enforce_app_routes(snap, self._routes())
                 self.updated.emit(snap)
             except Exception:
                 pass
@@ -86,8 +88,6 @@ class Poller(QThread):
 
 
 class Panel(QWidget):
-    statusText = pyqtSignal(str)
-
     def __init__(self, settings: dict, graph: GraphProcess) -> None:
         super().__init__(None)
         self.settings = settings
@@ -101,7 +101,6 @@ class Panel(QWidget):
         self._drawer_open = False
         self._eq_open = False
         self._drag_origin: QPoint | None = None
-        self._routed: set[int] = set()
         self._pool = ThreadPoolExecutor(max_workers=3)
 
         self._eq_keys = tuple(c.key for c in SINK_CHANNELS)
@@ -148,9 +147,13 @@ class Panel(QWidget):
         self.eq_persist_timer.setSingleShot(True)
         self.eq_persist_timer.timeout.connect(self._persist_eq)
 
-        self.poller = Poller(self)
+        self.poller = Poller(self._current_routes, self)
         self.poller.updated.connect(self._on_snapshot)
         self.poller.start()
+
+    def _current_routes(self) -> dict[str, str]:
+        routes = self.settings.get("routes")
+        return dict(routes) if isinstance(routes, dict) else {}
 
     # ----- construction -------------------------------------------------
 
@@ -169,7 +172,6 @@ class Panel(QWidget):
         self.status.setFont(T.font(9))
         self.status.setStyleSheet(f"color: {T.DIM}; background: transparent;")
         self.status.setFixedWidth(280)
-        self.statusText.connect(self.status.setText)
         self.status.move(
             T.SIDE_PAD + 36 + self.title.width() + 12,
             y + (T.BAR_H - 16) // 2,
@@ -256,12 +258,6 @@ class Panel(QWidget):
             "Launch hidden when the system starts.",
             bool(self.settings.get("autostart", True)),
             self._on_autostart,
-        )
-        self.snap_toggle, y = self._settings_row(
-            y, "Snap mouse",
-            "Move the cursor to the panel when it opens.",
-            bool(self.settings.get("snap_mouse", False)),
-            self._on_snap,
         )
         self.graph_toggle, y = self._settings_row(
             y, "Virtual channels",
@@ -372,6 +368,16 @@ class Panel(QWidget):
     def _page_width(self) -> int:
         return self._frame_width() - T.SIDE_PAD * 2
 
+    def _min_apps_width(self) -> int:
+        """Narrowest apps block whose header row still fits.
+
+        The row holds the apps mark + "App Mixer" on the left and the
+        EasyEffects chip, gear and close buttons on the right.
+        """
+        title_w = 36 + self.apps_title.width()
+        controls_w = self.effects_btn.width() + 12 + 32 + 16 + 32
+        return title_w + 24 + controls_w
+
     def _apps_width_for(self, count: int) -> int:
         screen = self._screen_geometry()
         chrome = T.SIDE_PAD * 2 + T.SONAR_BLOCK_W + T.DIVIDER_W
@@ -386,7 +392,7 @@ class Panel(QWidget):
             else:
                 n = max(1, int((max_inner + T.STRIP_GAP) // (T.APP_STRIP_W + T.STRIP_GAP)))
                 inner = n * T.APP_STRIP_W + max(0, n - 1) * T.STRIP_GAP
-        return inner_chrome + inner
+        return max(inner_chrome + inner, self._min_apps_width())
 
     def _screen_geometry(self) -> QRect:
         screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
@@ -457,8 +463,6 @@ class Panel(QWidget):
         self._animate(resting + QPoint(0, T.RISE_PX), resting, 0.0, 1.0, T.SHOW_MS, closing=False)
         self._pool.submit(self._refresh_now)
         self.frame_timer.start()
-        if self.settings.get("snap_mouse"):
-            QTimer.singleShot(T.SHOW_MS, self._snap_cursor)
 
     def hide_panel(self) -> None:
         if not self.visible_now:
@@ -518,10 +522,6 @@ class Panel(QWidget):
         group.finished.connect(finished)
         self._anim = group
         group.start()
-
-    def _snap_cursor(self) -> None:
-        if self.visible_now:
-            QCursor.setPos(self.geometry().center())
 
     # ----- drawer --------------------------------------------------------
 
@@ -678,10 +678,6 @@ class Panel(QWidget):
         set_autostart(value)
         self._persist()
 
-    def _on_snap(self, value: bool) -> None:
-        self.settings["snap_mouse"] = value
-        self._persist()
-
     def _on_manage_graph(self, value: bool) -> None:
         self.settings["manage_graph"] = value
         self._persist()
@@ -773,25 +769,7 @@ class Panel(QWidget):
             strip.apply_state(state.volume, state.muted)
         self._resize_for_apps(len(snap.apps))
         self.app_mixer.apply(snap.apps, self._busy)
-        self._apply_saved_routes(snap)
         self._update_status(snap)
-
-    def _apply_saved_routes(self, snap: Snapshot) -> None:
-        """Send a stream back to the channel it was assigned to last time."""
-        routes = self.settings.get("routes") or {}
-        if not routes:
-            return
-        live = {app.serial for app in snap.apps}
-        self._routed.intersection_update(live)
-        for app in snap.apps:
-            wanted = routes.get(app.binary or app.key)
-            if not wanted or wanted == app.channel or app.serial in self._routed:
-                continue
-            channel = next((c for c in ROUTABLE if c.key == wanted), None)
-            if channel is None:
-                continue
-            self._routed.add(app.serial)
-            self._pool.submit(pipewire.move_stream, app.serial, channel.node_name)
 
     def _update_status(self, snap: Snapshot) -> None:
         if not snap.channels:
@@ -807,6 +785,7 @@ class Panel(QWidget):
         try:
             snap = pipewire.snapshot()
             pipewire.retarget_channel_outputs(snap)
+            pipewire.enforce_app_routes(snap, self._current_routes())
         except Exception:
             return
         self.poller.updated.emit(snap)
@@ -874,51 +853,35 @@ class Panel(QWidget):
         self._pool.submit(self._write_mute, key, app.members or [app.node_id], state)
 
     def route_app(self, key: str, channel_key: str) -> None:
+        """Assign an app to a category ("" = back to the mix) and move it.
+
+        The move is a plain, gapless PipeWire retarget — EasyEffects is never
+        restarted (its stream grabbing is disabled at setup), and the poller
+        re-asserts the route should anything try to steal the stream back.
+        """
         app = next((a for a in self._snapshot.apps if a.key == key), None)
         if app is None:
             return
-        routes = dict(self.settings.get("routes") or {})
-        if not channel_key:
+        routes = self._current_routes()
+        if channel_key:
+            channel = next((c for c in ROUTABLE if c.key == channel_key), None)
+            if channel is None:
+                return
+            routes[app.binary or app.key] = channel_key
+            target = channel.node_name
+        else:
             routes.pop(app.binary or app.key, None)
-            self.settings["routes"] = routes
-            self._persist()
             target = self._snapshot.mix_target or self._snapshot.default_sink
-            if target:
-                self._pool.submit(self._route_worker, app, target, False)
-            return
-        channel = next((c for c in ROUTABLE if c.key == channel_key), None)
-        if channel is None:
-            return
-        routes[app.binary or app.key] = channel_key
         self.settings["routes"] = routes
         self._persist()
-        self._pool.submit(self._route_worker, app, channel.node_name, True)
+        self.app_mixer.mark_pending(key, channel_key)
+        if target:
+            self._pool.submit(self._route_worker, app, target)
 
-    def _route_worker(self, app, sink: str, exclude: bool) -> None:
-        """Move a stream, keeping the EasyEffects exclude list in sync.
-
-        A running EasyEffects with "process all output streams" immediately
-        pulls every non-excluded stream back to easyeffects_sink, so assigned
-        apps must be on its exclude list. EasyEffects only reads the list at
-        startup, which forces a graceful restart when it changes while up.
-        """
-        names = app.node_names or [app.name]
-        restarted = False
-        try:
-            if exclude:
-                restarted = effects.apply_exclusions(names, [])
-            else:
-                restarted = effects.apply_exclusions([], names)
-            if restarted:
-                self.statusText.emit("Restarted EasyEffects (exclude list)")
-        except Exception:
-            pass
-        pipewire.move_stream(app.serial, sink)
-        if restarted:
-            # Sinks reappear over the first second after the relaunch;
-            # reassert the target once things settle.
-            time.sleep(1.2)
-            pipewire.move_stream(app.serial, sink)
+    def _route_worker(self, app, sink: str) -> None:
+        for serial in app.serials or [app.serial]:
+            if serial:
+                pipewire.move_stream(serial, sink)
 
     def show_route_menu(self, key: str, global_pos: QPoint) -> None:
         menu = QMenu(self)

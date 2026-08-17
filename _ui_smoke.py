@@ -1,4 +1,4 @@
-"""Offscreen smoke test: vertical bins, real mouse-event drag, blocklist edits.
+"""Offscreen smoke test: vertical bins, real mouse-event drag, EasyEffects config edits.
 
 Run:  QT_QPA_PLATFORM=offscreen python _ui_smoke.py
 """
@@ -33,15 +33,15 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         FAILURES.append(name)
 
 
-# ----- blocklist unit checks (no Qt needed) --------------------------------
+# ----- manual-routing unit checks (no Qt needed) ----------------------------
 
-def test_blocklist() -> None:
+def test_manual_routing() -> None:
     from sonusdeck import effects
 
     rc = Path(_tmp) / "easyeffectsrc"
     rc.write_text(
         "[Presets]\n"
-        "lastLoadedOutputPreset=SonusDeck Aux\n"
+        "lastLoadedOutputPreset=SonusDeck Mix\n"
         "\n"
         "[StreamOutputs]\n"
         "outputDevice=some_sink\n"
@@ -52,36 +52,35 @@ def test_blocklist() -> None:
         encoding="utf-8",
     )
 
-    # Patch rc_paths so tests never touch the real config.
+    # Patch so tests never touch the real config or spawn EasyEffects.
     effects.rc_paths = lambda: [rc]
-
-    check("read empty blocklist", effects.read_excluded() == [])
-
-    ok = effects._edit_exclusions(["spotify", "vesktop"], [])
-    text = rc.read_text()
-    check("insert into existing group", ok and "blocklist=spotify,vesktop" in text)
-    check("insert placed inside [StreamOutputs]",
-          text.index("[StreamOutputs]") < text.index("blocklist=") < text.index("[Window]"))
-
-    ok = effects._edit_exclusions(["Firefox"], ["spotify"])
-    check("add+remove", ok and effects.read_excluded() == ["vesktop", "Firefox"])
-
-    ok = effects._edit_exclusions(["we,ird\\name"], [])
-    check("comma/backslash escaping roundtrip",
-          ok and "we,ird\\name" in effects.read_excluded())
-
-    ok = effects._edit_exclusions(["Firefox"], [])
-    check("no-op when already present", not ok)
-
-    check("other keys preserved",
-          "outputDevice=some_sink" in rc.read_text()
-          and "lastLoadedOutputPreset=SonusDeck Aux" in rc.read_text())
-
-    # apply_exclusions with EE not running: edits the file, no restart.
+    effects.installed = lambda: True
     effects.running = lambda: False
-    restarted = effects.apply_exclusions(["mpv"], [])
-    check("apply without EE running edits file, no restart",
-          not restarted and "mpv" in effects.read_excluded())
+
+    check("grab not yet disabled", not effects.process_all_disabled())
+    restarted = effects.ensure_manual_routing()
+    text = rc.read_text()
+    check("processAllOutputs written, no restart",
+          not restarted and "processAllOutputs=false" in text)
+    check("key placed inside [EffectsPipelines]",
+          "[EffectsPipelines]" in text
+          and text.index("[EffectsPipelines]") < text.index("processAllOutputs="))
+    check("grab disabled now", effects.process_all_disabled())
+    check("other keys preserved",
+          "outputDevice=some_sink" in text
+          and "lastLoadedOutputPreset=SonusDeck Mix" in text)
+
+    before = rc.read_text()
+    check("second call is a no-op",
+          not effects.ensure_manual_routing() and rc.read_text() == before)
+
+    # Missing config: the primary file is created so a first EasyEffects
+    # launch already starts with the grab disabled.
+    fresh = Path(_tmp) / "fresh" / "easyeffectsrc"
+    effects.rc_paths = lambda: [fresh]
+    effects.ensure_manual_routing()
+    check("config created when missing",
+          fresh.exists() and "processAllOutputs=false" in fresh.read_text())
 
 
 def test_passthrough() -> None:
@@ -157,7 +156,7 @@ def test_ui() -> None:
     apps = [
         AppStream(key=f"app{i}", name=name, node_id=100 + i, serial=1000 + i,
                   volume=0.5 + i * 0.1, icon_name="", binary=name.lower(),
-                  channel="", members=[100 + i], node_names=[name])
+                  channel="", members=[100 + i], serials=[1000 + i])
         for i, name in enumerate(["Firefox", "Spotify", "Vesktop", "mpv"])
     ]
     snap = Snapshot(
@@ -283,10 +282,26 @@ def test_ui() -> None:
     check("eq page open", panel._eq_open and panel.eq_panel.isVisible())
     panel._close_eq_panel(animate=False)
 
+    # With a single app the panel must stay wide enough for the header:
+    # "App Mixer" (icon + title) may not run under the EasyEffects chip.
+    snap_one = Snapshot(
+        channels={}, apps=apps[:1], default_sink="dummy",
+        mix_target="easyeffects_sink", ready=True,
+    )
+    panel._on_snapshot(snap_one)
+    app.processEvents()
+    title_right = panel.apps_title.x() + panel.apps_title.width()
+    check("header fits at minimum width",
+          title_right + 12 <= panel.effects_btn.x(),
+          f"title_right={title_right} chip_x={panel.effects_btn.x()}")
+    check("apps block respects minimum",
+          panel._apps_w >= panel._min_apps_width(),
+          f"apps_w={panel._apps_w} min={panel._min_apps_width()}")
+
 
 def main() -> int:
     try:
-        test_blocklist()
+        test_manual_routing()
         test_passthrough()
         test_ui()
     except Exception:

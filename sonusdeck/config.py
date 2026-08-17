@@ -81,7 +81,6 @@ SOCKET_PATH = runtime_dir() / f"{APP_ID}.sock"
 DEFAULTS: dict = {
     "autostart": True,
     "hotkey": "Ctrl+Alt+V",
-    "snap_mouse": False,
     "pos_x": None,
     "pos_y": None,
     "manage_graph": True,

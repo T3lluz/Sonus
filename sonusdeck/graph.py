@@ -251,15 +251,18 @@ class GraphProcess:
 
 
 def prepare() -> tuple[bool, str]:
-    """Bring up the virtual channels and keep EasyEffects from double-EQing.
+    """Bring up the virtual channels and tame EasyEffects.
 
-    Used by `sonusdeck --setup` and first launch. Safe to call repeatedly.
+    Keeps EasyEffects from double-EQing the mix and from re-grabbing streams
+    that SonusDeck routes. Used by `sonusdeck --setup` and first launch.
+    Safe to call repeatedly.
     """
     from . import effects
 
     proc = GraphProcess()
     ok = proc.start()
     effects.ensure_passthrough()
+    effects.ensure_manual_routing()
     if ok:
         return True, "Game, Chat, Media and Aux are ready"
     return False, proc.error or "could not start virtual channels"

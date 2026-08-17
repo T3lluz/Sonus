@@ -16,8 +16,8 @@
 #   3. Falls back to a private virtualenv for PyQt6 when the distro
 #      doesn't ship it.
 #   4. Puts `sonusdeck` and `sonusdeck-toggle` launchers in ~/.local/bin.
-#   5. Creates the Game / Chat / Media / Aux sinks and keeps EasyEffects
-#      from stacking a second EQ on the mix.
+#   5. Creates the Game / Chat / Media / Aux sinks and tames EasyEffects
+#      (no second EQ on the mix, no re-grabbing of assigned streams).
 #   6. Starts the panel. First launch registers the Ctrl+Alt+V shortcut,
 #      the desktop entry, and start-on-login (toggle it in Settings).
 
@@ -43,6 +43,11 @@ uninstall() {
     "$BIN_DIR/sonusdeck" --quit >/dev/null 2>&1 || true
     if command -v systemctl >/dev/null 2>&1; then
         systemctl --user disable --now sonusdeck.service >/dev/null 2>&1 || true
+    fi
+    # Stop a leftover channel graph if the panel didn't take it down.
+    if [ -f "$CONFIG_HOME/sonusdeck/graph.pid" ]; then
+        kill "$(cat "$CONFIG_HOME/sonusdeck/graph.pid")" >/dev/null 2>&1 || true
+        rm -f "$CONFIG_HOME/sonusdeck/graph.pid"
     fi
     rm -f "$BIN_DIR/sonusdeck" "$BIN_DIR/sonusdeck-toggle"
     rm -f "$CONFIG_HOME/autostart/sonusdeck.desktop"
@@ -90,17 +95,22 @@ pkg_install() {
 
 install_deps() {
     log "Installing system dependencies"
+    # SonusDeck drives the graph with pw-dump/pw-cli, pactl and wpctl, so the
+    # pulse shim and WirePlumber utilities are needed alongside PipeWire.
     if command -v pacman >/dev/null 2>&1; then
-        pkg_install git python python-pyqt6 pipewire || true
+        pkg_install git python python-pyqt6 pipewire libpulse wireplumber || true
         pkg_install easyeffects || warn "could not install EasyEffects (optional)"
     elif command -v apt-get >/dev/null 2>&1; then
-        pkg_install git python3 python3-venv python3-pyqt6 pipewire || true
+        pkg_install git python3 python3-venv python3-pyqt6 \
+            pipewire pipewire-pulse pulseaudio-utils wireplumber || true
         pkg_install easyeffects || warn "could not install EasyEffects (optional)"
     elif command -v dnf >/dev/null 2>&1; then
-        pkg_install git python3 python3-pyqt6 pipewire pipewire-utils || true
+        pkg_install git python3 python3-pyqt6 \
+            pipewire pipewire-utils pipewire-pulseaudio pulseaudio-utils wireplumber || true
         pkg_install easyeffects || warn "could not install EasyEffects (optional)"
     elif command -v zypper >/dev/null 2>&1; then
-        pkg_install git python3 python3-PyQt6 pipewire pipewire-tools || true
+        pkg_install git python3 python3-PyQt6 \
+            pipewire pipewire-tools pipewire-pulseaudio wireplumber || true
         pkg_install easyeffects || warn "could not install EasyEffects (optional)"
     fi
 }
@@ -110,6 +120,8 @@ install_deps
 command -v git     >/dev/null 2>&1 || die "git is required"
 command -v python3 >/dev/null 2>&1 || die "python3 is required"
 command -v pw-dump >/dev/null 2>&1 || warn "pw-dump not found: SonusDeck needs PipeWire to do anything useful"
+command -v pactl   >/dev/null 2>&1 || warn "pactl not found: install your distro's pipewire-pulse / pulseaudio-utils package"
+command -v wpctl   >/dev/null 2>&1 || warn "wpctl not found: install wireplumber for volume control"
 
 # ------------------------------------------------------------ fetch the app
 

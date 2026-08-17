@@ -558,6 +558,10 @@ class AppMixer(QWidget):
     def mark_pending(self, key: str, channel: str) -> None:
         """Optimistic assignment shown until the graph snapshot confirms."""
         self._pending[key] = (channel, time.monotonic())
+        strip = self.master.strips.get(key)
+        if strip is not None:
+            target = CHANNEL_BY_KEY.get(channel)
+            strip.set_accent(target.accent if target else T.APP_ACCENT)
         self._refresh_bins()
 
     def apply(self, streams: list[AppStream], busy: set[str]) -> None:
