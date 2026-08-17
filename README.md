@@ -20,7 +20,7 @@
 ## ⚡ Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/T3lluz/SonusDeck/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/T3lluz/Sonus/main/install.sh | bash
 ```
 
 One line installs the dependencies, creates the Game / Chat / Media / Aux sinks, tames EasyEffects (no second EQ, no stream stealing), and starts the panel. Re-run it to **update**, append `-s -- uninstall` to **remove**. From a checkout: `./install.sh`.

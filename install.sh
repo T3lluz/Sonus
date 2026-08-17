@@ -2,11 +2,11 @@
 # Sonus installer / uninstaller.
 #
 # Install (also updates an existing install):
-#   curl -fsSL https://raw.githubusercontent.com/T3lluz/SonusDeck/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/T3lluz/Sonus/main/install.sh | bash
 # Install from a cloned repo:
 #   ./install.sh
 # Uninstall:
-#   curl -fsSL https://raw.githubusercontent.com/T3lluz/SonusDeck/main/install.sh | bash -s -- uninstall
+#   curl -fsSL https://raw.githubusercontent.com/T3lluz/Sonus/main/install.sh | bash -s -- uninstall
 #
 # What it does:
 #   1. Installs system dependencies with your package manager
@@ -21,7 +21,7 @@
 #      the desktop entry, and start-on-login (toggle it in Settings).
 set -euo pipefail
 
-REPO_URL="${SONUSDECK_REPO:-https://github.com/T3lluz/SonusDeck}"
+REPO_URL="${SONUSDECK_REPO:-https://github.com/T3lluz/Sonus}"
 BRANCH="${SONUSDECK_BRANCH:-main}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
