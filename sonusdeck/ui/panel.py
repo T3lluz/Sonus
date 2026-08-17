@@ -167,8 +167,6 @@ class Panel(QWidget):
         self.close_btn.clicked.connect(self.hide_panel)
         self.gear_btn = IconButton("gear", 32, self)
         self.gear_btn.clicked.connect(self._toggle_drawer)
-        self.effects_btn = ChipButton("Open EasyEffects", mark=True, parent=self)
-        self.effects_btn.clicked.connect(self._open_effects)
 
         self._place_header()
 
@@ -178,8 +176,6 @@ class Panel(QWidget):
         right = width - T.SIDE_PAD
         self.close_btn.move(right - 32, y + (T.BAR_H - 32) // 2)
         self.gear_btn.move(right - 32 - 16 - 32, y + (T.BAR_H - 32) // 2)
-        chip_x = right - 32 - 16 - 32 - 12 - self.effects_btn.width()
-        self.effects_btn.move(chip_x, y + (T.BAR_H - self.effects_btn.height()) // 2)
 
         cluster_x = T.SIDE_PAD + T.SONAR_BLOCK_W + T.DIVIDER_W
         self.apps_mark.move(cluster_x, y + (T.BAR_H - 26) // 2)
@@ -261,18 +257,25 @@ class Panel(QWidget):
         )
 
         y = self._settings_caption(y + 14, "EQUALIZER")
-        y = self._settings_note(y, "The sliders icon opens that category's EQ.")
+        self._settings_note(y, "The sliders icon opens that category's EQ.")
 
-        y = self._settings_caption(y + 14, "UPDATES")
-        self._build_update_row(y)
+        self._build_update_section()
 
-    def _build_update_row(self, y: int) -> None:
-        """Footer strip: which build is installed, and a chip to move it on."""
+    def _build_update_section(self) -> None:
+        """Which build is installed and a chip to move it on.
+
+        Pinned to the foot of the drawer rather than carried by the flow: the
+        card above it is the last one, so the section keeps its footing
+        whatever the notes wrap to.
+        """
         pad = T.SETTINGS_PAD
         height = 44
+        top = T.STRIP_H - 12 - height
+        self._settings_caption(top - 22, "UPDATES")
+
         card = Card(parent=self.drawer)
         card.setFixedSize(T.SETTINGS_W - pad * 2, height)
-        card.move(pad, min(y, T.STRIP_H - 12 - height))
+        card.move(pad, top)
 
         self._upd_label = QLabel("", card)
         self._upd_label.setFont(T.font(9))
@@ -369,11 +372,11 @@ class Panel(QWidget):
     def _min_apps_width(self) -> int:
         """Narrowest apps block whose header row still fits.
 
-        The row holds the apps mark + "App Mixer" on the left and the
-        EasyEffects chip, gear and close buttons on the right.
+        The row holds the apps mark + "App Mixer" on the left and the gear
+        and close buttons on the right.
         """
         title_w = 36 + self.apps_title.width()
-        controls_w = self.effects_btn.width() + 12 + 32 + 16 + 32
+        controls_w = 32 + 16 + 32
         return title_w + 24 + controls_w
 
     def _apps_width_for(self, count: int) -> int:
@@ -779,10 +782,6 @@ class Panel(QWidget):
         self._upd_busy = False
         self._upd_state = "failed"
         self._upd_render()
-
-    def _open_effects(self) -> None:
-        if not effects.launch():
-            self.status.setText("EasyEffects not installed")
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Escape:

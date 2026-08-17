@@ -283,7 +283,7 @@ def test_ui() -> None:
     panel._close_eq_panel(animate=False)
 
     # With a single app the panel must stay wide enough for the header:
-    # "App Mixer" (icon + title) may not run under the EasyEffects chip.
+    # "App Mixer" (icon + title) may not run under the gear.
     snap_one = Snapshot(
         channels={}, apps=apps[:1], default_sink="dummy",
         mix_target="easyeffects_sink", ready=True,
@@ -292,8 +292,8 @@ def test_ui() -> None:
     app.processEvents()
     title_right = panel.apps_title.x() + panel.apps_title.width()
     check("header fits at minimum width",
-          title_right + 12 <= panel.effects_btn.x(),
-          f"title_right={title_right} chip_x={panel.effects_btn.x()}")
+          title_right + 12 <= panel.gear_btn.x(),
+          f"title_right={title_right} gear_x={panel.gear_btn.x()}")
     check("apps block respects minimum",
           panel._apps_w >= panel._min_apps_width(),
           f"apps_w={panel._apps_w} min={panel._min_apps_width()}")
