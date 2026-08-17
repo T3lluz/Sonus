@@ -46,7 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     from PyQt6.QtWidgets import QApplication
 
     from . import dbusapi, ipc, shortcut
-    from .config import APP_NAME, load_settings, save_settings, set_autostart, write_launch_desktop
+    from .config import (
+        APP_NAME, HOTKEY, load_settings, save_settings, set_autostart, write_launch_desktop,
+    )
     from .graph import GraphProcess
     from .ui.panel import Panel
 
@@ -54,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.install_shortcut:
         QApplication(sys.argv[:1])
-        ok, detail = shortcut.install(settings.get("hotkey", "Ctrl+Alt+V"))
+        ok, detail = shortcut.install(HOTKEY)
         print(detail)
         return 0 if ok else 1
 
@@ -87,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
 
     set_autostart(bool(settings.get("autostart", True)))
     write_launch_desktop()
-    shortcut.install(settings.get("hotkey", "Ctrl+Alt+V"))
+    shortcut.install(HOTKEY)
 
     panel = Panel(settings, graph)
     server.toggled.connect(panel.toggle)

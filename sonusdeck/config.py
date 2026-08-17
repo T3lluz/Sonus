@@ -16,6 +16,9 @@ from pathlib import Path
 APP_NAME = "SonusDeck"
 APP_ID = "sonusdeck"
 NODE_PREFIX = "sonusdeck"
+# Fixed binding; rebind the "SonusDeck Toggle" entry in the desktop's own
+# shortcut settings instead of through the panel.
+HOTKEY = "Ctrl+Alt+V"
 
 
 @dataclass(frozen=True)
@@ -80,7 +83,6 @@ SOCKET_PATH = runtime_dir() / f"{APP_ID}.sock"
 
 DEFAULTS: dict = {
     "autostart": True,
-    "hotkey": "Ctrl+Alt+V",
     "pos_x": None,
     "pos_y": None,
     "manage_graph": True,
@@ -239,7 +241,7 @@ def set_autostart(enabled: bool) -> None:
         pass
 
 
-def write_toggle_desktop(hotkey: str = "Ctrl+Alt+V") -> Path:
+def write_toggle_desktop(hotkey: str = HOTKEY) -> Path:
     DESKTOP_PATH.parent.mkdir(parents=True, exist_ok=True)
     DESKTOP_PATH.write_text(
         _DESKTOP_TEMPLATE.format(

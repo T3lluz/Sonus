@@ -26,8 +26,8 @@ BAND_COUNT = len(BAND_FREQS)
 # feels thin. 1.8 gives enough overlap that a boost is clearly audible while
 # keeping a graphic-EQ feel.
 BAND_Q = 1.8
-GAIN_LIMIT = 15.0  # dB, either direction
-PREAMP_LIMIT = 15.0
+GAIN_LIMIT = 18.0  # dB, either direction
+PREAMP_LIMIT = 18.0
 
 
 def band_name(index: int) -> str:
@@ -106,9 +106,15 @@ PRESETS: dict[str, tuple[float, ...]] = {
 
 
 def preset_preamp(gains: tuple[float, ...] | list[float]) -> float:
-    """Negative make-up gain so a boosty preset doesn't clip the mix."""
+    """Partial make-up gain: pull the preamp down by half the peak boost.
+
+    Full compensation cancelled the boost outright — a Bass preset ended up
+    *quieter* than flat, which read as "the EQ does nothing". Half keeps
+    presets audibly louder while shaving the worst clipping; anyone pushing
+    bands to the top by hand manages their own headroom via the preamp.
+    """
     peak = max((float(g) for g in gains), default=0.0)
-    return clamp_gain(-max(0.0, peak), PREAMP_LIMIT)
+    return clamp_gain(-max(0.0, peak) * 0.5, PREAMP_LIMIT)
 
 
 def load_all(settings: dict, keys: tuple[str, ...]) -> dict[str, ChannelEq]:

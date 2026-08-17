@@ -12,48 +12,17 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QBrush, QColor, QCursor, QGuiApplication, QPainter
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel, QMenu, QWidget
 
-from .. import effects, pipewire, shortcut
+from .. import effects, pipewire
 from .. import eq as eqmod
 from .. import theme as T
 from ..config import (
-    APP_NAME, CHANNELS, ROUTABLE, SINK_CHANNELS, save_settings, set_autostart,
+    APP_NAME, CHANNELS, HOTKEY, ROUTABLE, SINK_CHANNELS, save_settings, set_autostart,
 )
 from ..graph import GraphProcess
 from ..pipewire import Snapshot
 from .appmixer import AppMixer
 from .eqpanel import EqPanel
 from .widgets import AppsMark, BrandMark, Card, ChipButton, IconButton, Strip, Toggle
-
-
-_SPECIAL_KEYS = {
-    Qt.Key.Key_Space.value: "Space",
-    Qt.Key.Key_Tab.value: "Tab",
-    Qt.Key.Key_Return.value: "Return",
-    Qt.Key.Key_Enter.value: "Enter",
-    Qt.Key.Key_Insert.value: "Ins",
-    Qt.Key.Key_Delete.value: "Del",
-    Qt.Key.Key_Home.value: "Home",
-    Qt.Key.Key_End.value: "End",
-    Qt.Key.Key_PageUp.value: "PgUp",
-    Qt.Key.Key_PageDown.value: "PgDown",
-    Qt.Key.Key_Up.value: "Up",
-    Qt.Key.Key_Down.value: "Down",
-    Qt.Key.Key_Left.value: "Left",
-    Qt.Key.Key_Right.value: "Right",
-}
-
-
-def key_name(key: int) -> str:
-    """Name a key the way KDE writes it in kglobalshortcutsrc."""
-    if key in _SPECIAL_KEYS:
-        return _SPECIAL_KEYS[key]
-    if Qt.Key.Key_F1.value <= key <= Qt.Key.Key_F35.value:
-        return f"F{key - Qt.Key.Key_F1.value + 1}"
-    if Qt.Key.Key_A.value <= key <= Qt.Key.Key_Z.value:
-        return chr(key)
-    if Qt.Key.Key_0.value <= key <= Qt.Key.Key_9.value:
-        return chr(key)
-    return ""
 
 
 class Poller(QThread):
@@ -97,7 +66,6 @@ class Panel(QWidget):
         self._pending: dict[str, float] = {}
         self._snapshot = Snapshot()
         self._apps_w = T.APPS_VIEW_W
-        self._capturing = False
         self._drawer_open = False
         self._eq_open = False
         self._drag_origin: QPoint | None = None
@@ -266,37 +234,18 @@ class Panel(QWidget):
             self._on_manage_graph,
         )
 
-        card = Card(parent=self.drawer)
-        card.move(20, y)
-        card.setFixedSize(T.SETTINGS_W - 40, 76)
-        title = QLabel("Toggle shortcut", card)
-        title.setFont(T.semibold(11))
-        title.setStyleSheet(f"color: {T.TEXT}; background: transparent;")
-        title.move(16, 14)
-        hint = QLabel("Press to show or hide the panel.", card)
-        hint.setFont(T.font(9))
-        hint.setStyleSheet(f"color: {T.DIM}; background: transparent;")
-        hint.setWordWrap(True)
-        hint.setFixedWidth(200)
-        hint.move(16, 36)
-        self.hotkey_chip = ChipButton(
-            self.settings.get("hotkey", "Ctrl+Alt+V"),
-            surface=T.PANEL, hover=T.MUTE_HOVER, parent=card,
-        )
-        self.hotkey_chip.clicked.connect(self._start_capture)
-        self.hotkey_chip.move(card.width() - self.hotkey_chip.width() - 16, 22)
-        y += 76 + 10
-
-        self.shortcut_note = QLabel(
-            "Click the shortcut, then press a new combination. Esc cancels.",
+        shortcut_note = QLabel(
+            f"{HOTKEY} shows or hides the panel. To use a different key, "
+            f"rebind the \u201c{APP_NAME} Toggle\u201d entry in your desktop's "
+            "shortcut settings.",
             self.drawer,
         )
-        self.shortcut_note.setFont(T.font(9))
-        self.shortcut_note.setStyleSheet(f"color: {T.DIM}; background: transparent;")
-        self.shortcut_note.setWordWrap(True)
-        self.shortcut_note.setFixedWidth(T.SETTINGS_W - 40)
-        self.shortcut_note.move(20, y)
-        y += 48
+        shortcut_note.setFont(T.font(9))
+        shortcut_note.setStyleSheet(f"color: {T.DIM}; background: transparent;")
+        shortcut_note.setWordWrap(True)
+        shortcut_note.setFixedWidth(T.SETTINGS_W - 40)
+        shortcut_note.move(20, y)
+        y += 60
 
         eq_note = QLabel(
             "Each category has its own equaliser: click the sliders icon on Game, "
@@ -472,7 +421,6 @@ class Panel(QWidget):
         if self._eq_open:
             self._close_eq_panel(animate=False)
         self._persist_eq()
-        self._stop_capture()
         self._remember_position()
         self.visible_now = False
         self.poller.active = False
@@ -541,7 +489,6 @@ class Panel(QWidget):
 
     def _close_drawer(self, animate: bool = True) -> None:
         self._drawer_open = False
-        self._stop_capture()
         if animate:
             self._slide_drawer(self.width())
         else:
@@ -690,21 +637,7 @@ class Panel(QWidget):
         if not effects.launch():
             self.status.setText("EasyEffects not installed")
 
-    def _start_capture(self) -> None:
-        self._capturing = True
-        self.hotkey_chip.set_text("Press keys…")
-        self.setFocus()
-
-    def _stop_capture(self) -> None:
-        if not self._capturing:
-            return
-        self._capturing = False
-        self.hotkey_chip.set_text(self.settings.get("hotkey", "Ctrl+Alt+V"))
-
     def keyPressEvent(self, event) -> None:
-        if self._capturing:
-            self._capture_key(event)
-            return
         if event.key() == Qt.Key.Key_Escape:
             if self._eq_open:
                 self._close_eq_panel()
@@ -714,45 +647,6 @@ class Panel(QWidget):
                 self.hide_panel()
             return
         super().keyPressEvent(event)
-
-    def _capture_key(self, event) -> None:
-        key = event.key()
-        if key in (
-            Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Shift, Qt.Key.Key_Meta,
-        ):
-            return
-        if key == Qt.Key.Key_Escape:
-            self._stop_capture()
-            return
-        mods = event.modifiers()
-        if not (
-            mods & Qt.KeyboardModifier.ControlModifier
-            or mods & Qt.KeyboardModifier.AltModifier
-            or mods & Qt.KeyboardModifier.MetaModifier
-        ):
-            return
-        name = key_name(key)
-        if not name:
-            return
-        parts = []
-        if mods & Qt.KeyboardModifier.ControlModifier:
-            parts.append("Ctrl")
-        if mods & Qt.KeyboardModifier.AltModifier:
-            parts.append("Alt")
-        if mods & Qt.KeyboardModifier.ShiftModifier:
-            parts.append("Shift")
-        if mods & Qt.KeyboardModifier.MetaModifier:
-            parts.append("Meta")
-        parts.append(name)
-        sequence = "+".join(parts)
-        self._capturing = False
-        self.settings["hotkey"] = sequence
-        self._persist()
-        self.hotkey_chip.set_text(sequence)
-        ok, detail = shortcut.install(sequence)
-        self.shortcut_note.setText(
-            detail if ok else f"Could not register: {detail}"
-        )
 
     # ----- audio state ----------------------------------------------------
 
