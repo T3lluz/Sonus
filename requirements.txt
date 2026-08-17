@@ -1,4 +1,4 @@
-# SonusDeck runtime dependencies.
+# Sonus runtime dependencies.
 #
 # PyQt6 is the only Python package needed. On Arch prefer the distro build so
 # it matches the system Qt:

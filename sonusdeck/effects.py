@@ -6,14 +6,14 @@ Three jobs:
   the category mix lands in easyeffects_sink so extra device-wide effects
   (compressor, limiter, …) can still apply after the per-category EQs.
 * Keep EasyEffects from stacking a second equaliser on that mix. Category EQ
-  lives in the PipeWire filter-chain; loading a SonusDeck curve as the
+  lives in the PipeWire filter-chain; loading a Sonus curve as the
   EasyEffects output preset would colour every stream twice.
 * Keep EasyEffects from stealing streams. With "process all output streams"
   on, EasyEffects 8 re-targets every output stream to easyeffects_sink on
   every PipeWire node event, which silently undoes any assignment to a
-  SonusDeck category (its file-based exclude list is not reliably honoured
+  Sonus category (its file-based exclude list is not reliably honoured
   for streams that appear after startup). ensure_manual_routing() turns that
-  setting off once; SonusDeck then owns stream routing itself and still parks
+  setting off once; Sonus then owns stream routing itself and still parks
   unassigned apps on easyeffects_sink so post-mix effects keep applying.
   EasyEffects reads its config at startup only, so the one-time flip needs a
   graceful restart (quit via its own CLI, which saves state, then relaunch
@@ -106,7 +106,9 @@ def status_text() -> str:
 # ----- keep EasyEffects from stacking a second EQ ----------------------
 
 
-MIX_PRESET = "SonusDeck Mix"
+MIX_PRESET = "Sonus Mix"
+# Preset names written before the rename from "SonusDeck"; still cleaned up.
+_LEGACY_PREFIX = "SonusDeck"
 
 
 def _config_home() -> Path:
@@ -151,7 +153,13 @@ def _equalizer_db_paths() -> list[Path]:
 
 
 def category_preset_names() -> tuple[str, ...]:
-    return tuple(f"SonusDeck {channel.label.title()}" for channel in SINK_CHANNELS)
+    return tuple(f"Sonus {channel.label.title()}" for channel in SINK_CHANNELS)
+
+
+def _legacy_preset_names() -> tuple[str, ...]:
+    return (f"{_LEGACY_PREFIX} Mix",) + tuple(
+        f"{_LEGACY_PREFIX} {channel.label.title()}" for channel in SINK_CHANNELS
+    )
 
 
 def _mix_payload() -> dict:
@@ -205,7 +213,7 @@ def _ensure_mix_preset(directory: Path) -> bool:
 
 
 def _delete_category_presets(directory: Path) -> None:
-    for name in category_preset_names():
+    for name in category_preset_names() + _legacy_preset_names():
         try:
             (directory / f"{name}.json").unlink(missing_ok=True)
         except OSError:
@@ -316,11 +324,11 @@ def ensure_passthrough() -> bool:
     """Stop EasyEffects applying a second EQ on the category mix.
 
     Deletes the old per-category output presets (they were being loaded as
-    the device-wide chain), keeps a passthrough "SonusDeck Mix" preset, and
+    the device-wide chain), keeps a passthrough "Sonus Mix" preset, and
     bypasses any equalizer still in the active output preset. Returns True
     when a running EasyEffects was told to reload.
     """
-    names = set(category_preset_names())
+    names = set(category_preset_names()) | set(_legacy_preset_names())
     mix_changed = False
     removed_category = False
     for directory in preset_dirs():
@@ -415,7 +423,7 @@ def process_all_disabled() -> bool:
 def ensure_manual_routing() -> bool:
     """Turn off "process all output streams" so assignments stick.
 
-    SonusDeck routes every app stream itself (assigned apps to their category
+    Sonus routes every app stream itself (assigned apps to their category
     sink, the rest to easyeffects_sink), so EasyEffects must not re-grab them.
     EasyEffects reads its config at startup only and rewrites it on exit, so
     when the value has to change while it runs: quit (it saves state), write

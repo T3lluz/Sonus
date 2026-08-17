@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SonusDeck development runner with live reload.
+# Sonus development runner with live reload.
 #
 #     ./dev.sh
 #

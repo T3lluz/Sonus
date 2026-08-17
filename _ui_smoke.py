@@ -41,7 +41,7 @@ def test_manual_routing() -> None:
     rc = Path(_tmp) / "easyeffectsrc"
     rc.write_text(
         "[Presets]\n"
-        "lastLoadedOutputPreset=SonusDeck Mix\n"
+        "lastLoadedOutputPreset=Sonus Mix\n"
         "\n"
         "[StreamOutputs]\n"
         "outputDevice=some_sink\n"
@@ -68,7 +68,7 @@ def test_manual_routing() -> None:
     check("grab disabled now", effects.process_all_disabled())
     check("other keys preserved",
           "outputDevice=some_sink" in text
-          and "lastLoadedOutputPreset=SonusDeck Mix" in text)
+          and "lastLoadedOutputPreset=Sonus Mix" in text)
 
     before = rc.read_text()
     check("second call is a no-op",
@@ -110,15 +110,15 @@ def test_passthrough() -> None:
 
     reloaded = effects.ensure_passthrough()
     check("passthrough does not reload when EE is stopped", not reloaded)
-    check("category presets removed",
+    check("legacy category presets removed",
           not (out_dir / "SonusDeck Aux.json").exists()
           and not (out_dir / "SonusDeck Game.json").exists())
-    mix = out_dir / "SonusDeck Mix.json"
+    mix = out_dir / "Sonus Mix.json"
     check("mix preset written", mix.exists())
     payload = mix.read_text()
     check("mix has no equalizer", "equalizer" not in payload)
     check("last loaded switched to Mix",
-          "lastLoadedOutputPreset=SonusDeck Mix" in rc.read_text())
+          "lastLoadedOutputPreset=Sonus Mix" in rc.read_text())
     check("equalizer db flattened",
           "band0Gain=0" in eqdb.read_text() and "band1Gain=0" in eqdb.read_text())
 

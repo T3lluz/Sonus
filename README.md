@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="sonusdeck/data/icon.png" width="112" alt="SonusDeck icon">
+<img src="sonusdeck/data/icon.png" width="112" alt="Sonus icon">
 
-# SonusDeck
+# Sonus
 
 **Sonar-style volume mixer for PipeWire.** Master / Game / Chat / Media / Aux channels, drag-and-drop app routing, and a 10-band equalizer per category — one hotkey away.
 
@@ -11,7 +11,7 @@
 [![UI](https://img.shields.io/badge/UI-PyQt6-539FEA?logo=qt&logoColor=white)](#)
 [![License](https://img.shields.io/badge/license-MIT-8B93A0)](LICENSE)
 
-<img src="docs/mixer.png" width="900" alt="SonusDeck mixer">
+<img src="docs/mixer.png" width="900" alt="Sonus mixer">
 
 *Linux counterpart to [SteelSeries Sonar](https://steelseries.com/gg/sonar) — sibling of [SonarDeck](https://github.com/T3lluz/SonarDeck).*
 
@@ -27,7 +27,7 @@ One line installs the dependencies, creates the Game / Chat / Media / Aux sinks,
 
 - App lives in `~/.local/share/sonusdeck`, launchers `sonusdeck` / `sonusdeck-toggle` in `~/.local/bin`
 - First launch registers **Ctrl+Alt+V**, a desktop entry, and start-on-login (toggle in Settings)
-- Different key? Rebind *SonusDeck Toggle* in your desktop's shortcut settings
+- Different key? Rebind *Sonus Toggle* in your desktop's shortcut settings
 - Settings, routes, and EQ curves persist in `~/.config/sonusdeck/settings.json`
 
 ## 🎚️ Mixer
@@ -58,7 +58,7 @@ Each category has its own 10-band EQ (±18 dB) running on its PipeWire sink — 
 
 ## 🔀 Routing
 
-SonusDeck routes streams itself: assigned apps play into their category sink, everything else into EasyEffects. The panel re-asserts routes continuously, so nothing can silently steal a stream back. Setup disables EasyEffects' *process all output streams* once — after that, moving an app between categories is a plain PipeWire retarget: instant, gapless, audio keeps playing.
+Sonus routes streams itself: assigned apps play into their category sink, everything else into EasyEffects. The panel re-asserts routes continuously, so nothing can silently steal a stream back. Setup disables EasyEffects' *process all output streams* once — after that, moving an app between categories is a plain PipeWire retarget: instant, gapless, audio keeps playing.
 
 ## 🛠️ Develop
 

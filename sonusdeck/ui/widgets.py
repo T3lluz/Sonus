@@ -621,7 +621,7 @@ class Card(QWidget):
 
 
 class BrandMark(QWidget):
-    """SonusDeck mark: a sonar pulse."""
+    """Sonus mark: a sonar pulse."""
 
     def __init__(self, size: int = 26, parent: QWidget | None = None) -> None:
         super().__init__(parent)

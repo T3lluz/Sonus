@@ -13,10 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-APP_NAME = "SonusDeck"
+APP_NAME = "Sonus"
+# On-disk/IPC identifiers keep the historical "sonusdeck" spelling so
+# existing installs (config dir, launchers, node names, D-Bus) keep working.
 APP_ID = "sonusdeck"
 NODE_PREFIX = "sonusdeck"
-# Fixed binding; rebind the "SonusDeck Toggle" entry in the desktop's own
+# Fixed binding; rebind the "Sonus Toggle" entry in the desktop's own
 # shortcut settings instead of through the panel.
 HOTKEY = "Ctrl+Alt+V"
 
@@ -275,7 +277,7 @@ def write_toggle_desktop(hotkey: str = HOTKEY) -> Path:
     DESKTOP_PATH.write_text(
         _DESKTOP_TEMPLATE.format(
             name=f"{APP_NAME} Toggle",
-            comment="Show or hide the SonusDeck mixer",
+            comment="Show or hide the Sonus mixer",
             exec=toggle_command(),
             icon=install_icon(),
             nodisplay="true",

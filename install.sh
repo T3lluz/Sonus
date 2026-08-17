@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SonusDeck installer / uninstaller.
+# Sonus installer / uninstaller.
 #
 # Install (also updates an existing install):
 #   curl -fsSL https://raw.githubusercontent.com/T3lluz/SonusDeck/main/install.sh | bash
@@ -60,9 +60,9 @@ WARNINGS=()
 
 banner() {
     printf '\n'
-    printf '%s\n' "${C_BLUE}${C_BOLD}  ░█▀▀░█▀█░█▀█░█░█░█▀▀░░░█▀▄░█▀▀░█▀▀░█░█${C_RESET}"
-    printf '%s\n' "${C_BLUE}${C_BOLD}  ░▀▀█░█░█░█░█░█░█░▀▀█░░░█░█░█▀▀░█░░░█▀▄${C_RESET}"
-    printf '%s\n' "${C_BLUE}${C_BOLD}  ░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀░░░▀▀░░▀▀▀░▀▀▀░▀░▀${C_RESET}"
+    printf '%s\n' "${C_BLUE}${C_BOLD}  ░█▀▀░█▀█░█▀█░█░█░█▀▀${C_RESET}"
+    printf '%s\n' "${C_BLUE}${C_BOLD}  ░▀▀█░█░█░█░█░█░█░▀▀█${C_RESET}"
+    printf '%s\n' "${C_BLUE}${C_BOLD}  ░▀▀▀░▀▀▀░▀░▀░▀▀▀░▀▀▀${C_RESET}"
     printf '%s\n\n' "${C_DIM}  Sonar-style PipeWire mixer for Linux${C_RESET}"
 }
 
@@ -98,7 +98,7 @@ banner
 
 # ---------- uninstall ----------
 if [ "$ACTION" = "uninstall" ]; then
-    section "Stopping SonusDeck"
+    section "Stopping Sonus"
 
     step "Panel"
     run "$BIN_DIR/sonusdeck" --quit || true
@@ -140,7 +140,7 @@ if [ "$ACTION" = "uninstall" ]; then
     rmdir "$APP_HOME" 2>/dev/null || true
     ok
 
-    printf '\n%s\n' "${C_GREEN}${C_BOLD}  SonusDeck removed.${C_RESET}"
+    printf '\n%s\n' "${C_GREEN}${C_BOLD}  Sonus removed.${C_RESET}"
     print_warnings
     printf '\n  %s\n' "${C_DIM}Settings kept in ${CONFIG_HOME}/sonusdeck (delete manually if unwanted).${C_RESET}"
     printf '  %s\n\n' "${C_DIM}Log: ${LOG_FILE}${C_RESET}"
@@ -188,7 +188,7 @@ pkg_install() {
 }
 
 if [ -n "$SUDO" ] || [ "$(id -u)" -eq 0 ]; then
-    # SonusDeck drives the graph with pw-dump/pw-cli, pactl and wpctl, so the
+    # Sonus drives the graph with pw-dump/pw-cli, pactl and wpctl, so the
     # pulse shim and WirePlumber utilities are needed alongside PipeWire.
     BASE_PKGS=""
     if command -v pacman >/dev/null 2>&1; then
@@ -239,12 +239,12 @@ recommend() {
 
 require git
 require python3
-recommend pw-dump "SonusDeck needs PipeWire to do anything useful"
+recommend pw-dump "Sonus needs PipeWire to do anything useful"
 recommend pactl   "install your distro's pipewire-pulse / pulseaudio-utils package"
 recommend wpctl   "install wireplumber for volume control"
 
 # ---------- fetch the app ----------
-section "Fetching SonusDeck"
+section "Fetching Sonus"
 
 # When this script runs from inside a checkout (not piped via curl), install
 # that working tree — handy for development and for unpublished forks.
@@ -334,7 +334,7 @@ fi
 # ---------- launch ----------
 section "Finishing up"
 
-step "Starting SonusDeck"
+step "Starting Sonus"
 if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
     # First run registers the global shortcut, desktop entry and autostart.
     (setsid "$BIN_DIR/sonusdeck" >>"$LOG_FILE" 2>&1 </dev/null &) || true
@@ -344,7 +344,7 @@ else
 fi
 
 # ---------- summary ----------
-printf '\n%s\n' "${C_GREEN}${C_BOLD}  SonusDeck installed successfully.${C_RESET}"
+printf '\n%s\n' "${C_GREEN}${C_BOLD}  Sonus installed successfully.${C_RESET}"
 print_warnings
 cat <<EOF
 

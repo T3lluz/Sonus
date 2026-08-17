@@ -1,4 +1,4 @@
-"""SonusDeck: a hotkey volume panel for PipeWire.
+"""Sonus: a hotkey volume panel for PipeWire.
 
     config.py    identity, channel list, settings
     theme.py     colours, metrics, fonts

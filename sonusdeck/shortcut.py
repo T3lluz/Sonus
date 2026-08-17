@@ -4,7 +4,7 @@ The compositor owns global keys. We bind Ctrl+Alt+V three ways:
 
 1. A ~/.local/bin wrapper (same pattern as other working KDE service shortcuts)
 2. KGlobalAccel ``_launch`` on that desktop file
-3. A KWin script that calls SonusDeck over D-Bus (this is what actually
+3. A KWin script that calls Sonus over D-Bus (this is what actually
    reaches the key when a Wayland app has focus)
 """
 

@@ -310,7 +310,7 @@ def retarget_channel_outputs(snap: Snapshot) -> None:
 
 
 def enforce_app_routes(snap: Snapshot, routes: dict[str, str]) -> None:
-    """Keep every app stream where SonusDeck routed it.
+    """Keep every app stream where Sonus routed it.
 
     Assigned apps play into their category sink; everything else is parked on
     the mix target (easyeffects_sink while EasyEffects runs) so post-mix
