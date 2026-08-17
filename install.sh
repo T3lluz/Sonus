@@ -2,11 +2,11 @@
 # Sonus installer / uninstaller.
 #
 # Install (also updates an existing install):
-#   curl -fsSL https://raw.githubusercontent.com/T3lluz/Sonus/main/install.sh | bash
+#   curl -fsSL https://gitlab.com/T3lluz/Sonus/-/raw/main/install.sh | bash
 # Install from a cloned repo:
 #   ./install.sh
 # Uninstall:
-#   curl -fsSL https://raw.githubusercontent.com/T3lluz/Sonus/main/install.sh | bash -s -- uninstall
+#   curl -fsSL https://gitlab.com/T3lluz/Sonus/-/raw/main/install.sh | bash -s -- uninstall
 #
 # What it does:
 #   1. Installs system dependencies with your package manager
@@ -21,7 +21,7 @@
 #      the desktop entry, and start-on-login (toggle it in Settings).
 set -euo pipefail
 
-REPO_URL="${SONUSDECK_REPO:-https://github.com/T3lluz/Sonus}"
+REPO_URL="${SONUSDECK_REPO:-https://gitlab.com/T3lluz/Sonus.git}"
 BRANCH="${SONUSDECK_BRANCH:-main}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -266,6 +266,8 @@ if [ -n "$LOCAL_SRC" ]; then
     ok
 elif [ -d "$APP_DIR/.git" ]; then
     step "Updating existing install"
+    # Installs made before the move still point at the old host.
+    run git -C "$APP_DIR" remote set-url origin "$REPO_URL" || true
     run git -C "$APP_DIR" fetch origin "$BRANCH" || die "git fetch failed"
     run git -C "$APP_DIR" reset --hard "origin/$BRANCH" || die "git reset failed"
     ok
