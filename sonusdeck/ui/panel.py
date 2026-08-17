@@ -200,27 +200,36 @@ class Panel(QWidget):
         self.app_mixer.move(T.SIDE_PAD + T.SONAR_BLOCK_W + T.DIVIDER_W, top)
 
     def _build_drawer(self) -> None:
+        """A rounded settings card floating over the deck, like the EQ page."""
         self.drawer = QWidget(self)
         self.drawer.setFixedWidth(T.SETTINGS_W)
         self.drawer.setObjectName("drawer")
         self.drawer.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.drawer.setStyleSheet(
             f"#drawer {{ background-color: {T.PANEL};"
-            f" border-left: 1px solid {T.RULE}; }}"
+            f" border: 1px solid {T.RULE};"
+            f" border-radius: {T.CARD_R}px; }}"
         )
         self.drawer.setFixedHeight(T.STRIP_H)
-        self.drawer.move(self.width(), T.TOP_PAD + T.BAR_H + T.HEADER_GAP)
+        self.drawer.move(self.width(), self._content_top())
 
+        pad = T.SETTINGS_PAD
         head = QLabel("SETTINGS", self.drawer)
-        head.setFont(T.semibold(13))
+        head.setFont(T.semibold(14))
         head.setStyleSheet(f"color: {T.TEXT}; background: transparent;")
-        head.move(20, 20)
+        head.move(pad + 20, 20)
+
+        self._drawer_dot = QWidget(self.drawer)
+        self._drawer_dot.setStyleSheet(
+            f"background-color: {T.FILL}; border-radius: 5px;"
+        )
+        self._drawer_dot.setGeometry(pad, 26, 10, 10)
 
         close = IconButton("close", 32, self.drawer)
         close.clicked.connect(self._close_drawer)
-        close.move(T.SETTINGS_W - 20 - 32, 16)
+        close.move(T.SETTINGS_W - pad - 32, 18)
 
-        y = 62
+        y = self._settings_caption(64, "GENERAL")
         self.autostart_toggle, y = self._settings_row(
             y, "Start with system",
             "Launch hidden when the system starts.",
@@ -234,36 +243,27 @@ class Panel(QWidget):
             self._on_manage_graph,
         )
 
-        shortcut_note = QLabel(
+        y = self._settings_caption(y + 14, "SHORTCUT")
+        y = self._settings_note(
+            y,
             f"{HOTKEY} shows or hides the panel. To use a different key, "
             f"rebind the \u201c{APP_NAME} Toggle\u201d entry in your desktop's "
             "shortcut settings.",
-            self.drawer,
         )
-        shortcut_note.setFont(T.font(9))
-        shortcut_note.setStyleSheet(f"color: {T.DIM}; background: transparent;")
-        shortcut_note.setWordWrap(True)
-        shortcut_note.setFixedWidth(T.SETTINGS_W - 40)
-        shortcut_note.move(20, y)
-        y += 60
 
-        eq_note = QLabel(
-            "Each category has its own equaliser: click the sliders icon on Game, "
-            "Chat, Media or Aux. EasyEffects stays a post-mix slot for extra "
-            "effects — its equaliser is left off so the two don't stack.",
-            self.drawer,
+        y = self._settings_caption(y + 14, "EQUALIZER")
+        self._settings_note(
+            y,
+            "Each category has its own equaliser: click the sliders icon on "
+            "Game, Chat, Media or Aux. EasyEffects stays a post-mix slot for "
+            "extra effects — its equaliser is left off so the two don't stack.",
         )
-        eq_note.setFont(T.font(9))
-        eq_note.setStyleSheet(f"color: {T.DIM}; background: transparent;")
-        eq_note.setWordWrap(True)
-        eq_note.setFixedWidth(T.SETTINGS_W - 40)
-        eq_note.move(20, y)
 
     def _build_eq_panel(self) -> None:
         """The EQ is a full page sliding over the deck, not a drawer."""
         self.eq_panel = EqPanel(self)
         self.eq_panel.set_page_width(self._page_width())
-        self.eq_panel.move(self.width(), self._content_top())
+        self.eq_panel.move(T.SIDE_PAD, self._eq_parked_y())
         self.eq_panel.hide()
         self._eq_fx = QGraphicsOpacityEffect(self.eq_panel)
         self._eq_fx.setOpacity(1.0)
@@ -271,10 +271,19 @@ class Panel(QWidget):
         self.eq_panel.eqChanged.connect(self._on_eq_changed)
         self.eq_panel.backRequested.connect(self._close_eq_panel)
 
+    def _settings_caption(self, y: int, text: str) -> int:
+        caption = QLabel(text, self.drawer)
+        caption.setFont(T.semibold(9))
+        caption.setStyleSheet(f"color: {T.DIM}; background: transparent;")
+        caption.adjustSize()
+        caption.move(T.SETTINGS_PAD + 4, y)
+        return y + 22
+
     def _settings_row(self, y: int, title: str, hint: str, value: bool, handler):
+        pad = T.SETTINGS_PAD
         card = Card(parent=self.drawer)
-        card.move(20, y)
-        card.setFixedSize(T.SETTINGS_W - 40, 76)
+        card.move(pad, y)
+        card.setFixedSize(T.SETTINGS_W - pad * 2, 76)
         label = QLabel(title, card)
         label.setFont(T.semibold(11))
         label.setStyleSheet(f"color: {T.TEXT}; background: transparent;")
@@ -283,12 +292,27 @@ class Panel(QWidget):
         sub.setFont(T.font(9))
         sub.setStyleSheet(f"color: {T.DIM}; background: transparent;")
         sub.setWordWrap(True)
-        sub.setFixedWidth(210)
+        sub.setFixedWidth(card.width() - 32 - Toggle.W - 16)
         sub.move(16, 36)
         toggle = Toggle(value, card)
         toggle.move(card.width() - Toggle.W - 16, (76 - Toggle.H) // 2)
         toggle.toggled.connect(handler)
         return toggle, y + 76 + 10
+
+    def _settings_note(self, y: int, text: str) -> int:
+        """Body copy on the same rounded surface as the toggle rows."""
+        pad = T.SETTINGS_PAD
+        card = Card(parent=self.drawer)
+        card.move(pad, y)
+        note = QLabel(text, card)
+        note.setFont(T.font(9))
+        note.setStyleSheet(f"color: {T.DIM}; background: transparent;")
+        note.setWordWrap(True)
+        width = T.SETTINGS_W - pad * 2 - 32
+        note.setFixedSize(width, note.heightForWidth(width))
+        note.move(16, 14)
+        card.setFixedSize(T.SETTINGS_W - pad * 2, note.height() + 28)
+        return y + card.height() + 10
 
     # ----- painting -----------------------------------------------------
 
@@ -357,15 +381,12 @@ class Panel(QWidget):
         self.app_mixer.set_view_width(width)
         self.setFixedSize(new_w, T.WIN_H)
         self._place_header()
-        if not self._drawer_open:
-            self.drawer.move(self.width(), self.drawer.y())
-        else:
-            self.drawer.move(self.width() - T.SETTINGS_W, self.drawer.y())
+        self.drawer.move(
+            self._drawer_x(self._drawer_open), self.drawer.y()
+        )
         self.eq_panel.set_page_width(self._page_width())
-        if self._eq_open:
-            self.eq_panel.move(T.SIDE_PAD, self.eq_panel.y())
-        else:
-            self.eq_panel.move(self.width(), self.eq_panel.y())
+        if not self._eq_open:
+            self.eq_panel.move(T.SIDE_PAD, self._eq_parked_y())
         screen = self._screen_geometry()
         if left + new_w > screen.right():
             left = max(screen.left(), screen.right() - new_w)
@@ -479,20 +500,28 @@ class Panel(QWidget):
         else:
             self._open_drawer()
 
+    def _drawer_x(self, open_: bool) -> int:
+        if open_:
+            return self.width() - T.SETTINGS_W - T.SIDE_PAD
+        return self.width()
+
     def _open_drawer(self) -> None:
         if self._eq_open:
             self._close_eq_panel(animate=False)
         self._drawer_open = True
         self.drawer.show()
         self.drawer.raise_()
-        self._slide_drawer(self.width() - T.SETTINGS_W)
+        self._slide_drawer(self._drawer_x(True))
 
     def _close_drawer(self, animate: bool = True) -> None:
         self._drawer_open = False
         if animate:
-            self._slide_drawer(self.width())
-        else:
-            self.drawer.move(self.width(), self.drawer.y())
+            self._slide_drawer(self._drawer_x(False))
+            return
+        if self._drawer_anim is not None:
+            self._drawer_anim.stop()
+            self._drawer_anim = None
+        self.drawer.move(self._drawer_x(False), self.drawer.y())
 
     def _slide_drawer(self, target_x: int) -> None:
         if self._drawer_anim is not None:
@@ -532,13 +561,13 @@ class Panel(QWidget):
         self.eq_panel.raise_()
         if already_open:
             # Switching category: the faders glide from the old curve to the new.
-            self.eq_panel.move(T.SIDE_PAD, self.eq_panel.y())
+            self.eq_panel.move(T.SIDE_PAD, self._content_top())
         else:
-            # Slide the page in from the right edge while fading it in, with
-            # the faders spreading out from the 0 dB line into the saved curve.
+            # The page drops down over the deck while fading in, with the
+            # faders spreading out from the 0 dB line into the saved curve.
             self.eq_panel.play_entrance()
-            self.eq_panel.move(self.width(), self.eq_panel.y())
-            self._slide_eq(T.SIDE_PAD, 0.0, 1.0)
+            self.eq_panel.move(T.SIDE_PAD, self._eq_parked_y())
+            self._reveal_eq(self._content_top(), 0.0, 1.0)
 
     def _close_eq_panel(self, animate: bool = True) -> None:
         if not self._eq_open:
@@ -546,13 +575,21 @@ class Panel(QWidget):
         self._eq_open = False
         self._persist_eq()
         if animate:
-            self._slide_eq(self.width(), 1.0, 0.0, hide_after=True)
-        else:
-            self.eq_panel.hide()
-            self.eq_panel.move(self.width(), self.eq_panel.y())
+            self._reveal_eq(self._eq_parked_y(), 1.0, 0.0, hide_after=True)
+            return
+        if self._eq_anim is not None:
+            self._eq_anim.stop()
+            self._eq_anim = None
+        self.eq_panel.hide()
+        self._eq_fx.setOpacity(1.0)
+        self.eq_panel.move(T.SIDE_PAD, self._eq_parked_y())
 
-    def _slide_eq(
-        self, target_x: int, from_op: float, to_op: float, hide_after: bool = False
+    def _eq_parked_y(self) -> int:
+        """Resting spot just above the deck, where the page lifts back to."""
+        return self._content_top() - T.PAGE_DROP_PX
+
+    def _reveal_eq(
+        self, target_y: int, from_op: float, to_op: float, hide_after: bool = False
     ) -> None:
         if self._eq_anim is not None:
             self._eq_anim.stop()
@@ -563,8 +600,9 @@ class Panel(QWidget):
             QEasingCurve.Type.InCubic if hide_after else QEasingCurve.Type.OutCubic
         )
         slide.setStartValue(self.eq_panel.pos())
-        slide.setEndValue(QPoint(target_x, self.eq_panel.y()))
+        slide.setEndValue(QPoint(T.SIDE_PAD, target_y))
         group.addAnimation(slide)
+        self._eq_fx.setOpacity(from_op)
         fade = QPropertyAnimation(self._eq_fx, b"opacity", self)
         fade.setDuration(T.PAGE_MS)
         fade.setStartValue(from_op)

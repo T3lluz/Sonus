@@ -40,6 +40,8 @@ FADER_BOT = MUTE_Y0 - 40
 THUMB_W = 22.0
 THUMB_H = 40.0
 TRACK_W = 10.0
+# Slack around the track that still counts as grabbing the fader.
+FADER_HIT_PAD = 9.0
 
 # EQ affordance in the top-right corner of category strips.
 EQ_ICON_SIZE = 26
@@ -69,7 +71,8 @@ APP_ICON = 46
 SCROLL_H = 10
 SCROLL_PAD = 14
 SETTINGS_W = 400
-SETTINGS_CARD_R = 12
+SETTINGS_CARD_R = 14
+SETTINGS_PAD = 18
 WINDOW_R = 20
 
 # Full-page equaliser view.
@@ -95,6 +98,8 @@ SHOW_MS = 180
 HIDE_MS = 140
 DRAWER_MS = 220
 PAGE_MS = 260
+# The EQ page drops in over the deck instead of sliding in from the side.
+PAGE_DROP_PX = 34
 
 
 # Segoe UI is not on Linux; pick the closest grotesque that is actually installed.

@@ -112,7 +112,7 @@ class Strip(QWidget):
         self.m = metrics or (APP_METRICS if app else CHANNEL_METRICS)
         self.setFixedSize(width, self.m.height)
         self.setMouseTracking(True)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
 
         self.volume = 1.0
         self.target = 1.0
@@ -144,6 +144,15 @@ class Strip(QWidget):
 
         mx = (width - self.m.mute_size) / 2
         self._mute_rect = QRectF(mx, self.m.mute_y, self.m.mute_size, self.m.mute_size)
+
+        # Volume only reacts on the fader itself: the track plus a grip margin
+        # for the thumb. Clicking the card anywhere else must not jump it.
+        hit_w = max(self.m.thumb_w, self.m.track_w) + T.FADER_HIT_PAD * 2
+        grip = self.m.thumb_h / 2
+        self._fader_rect = QRectF(
+            (width - hit_w) / 2, self.fader_top - grip,
+            hit_w, (self.fader_bot - self.fader_top) + grip * 2,
+        )
 
     # ----- state -------------------------------------------------------
 
@@ -236,11 +245,13 @@ class Strip(QWidget):
         if self.eq_icon and self._eq_rect.contains(pos):
             self.eqClicked.emit(self.key)
             return
-        if self.app and pos.y() < self.fader_top - 6:
-            # Header grab: becomes a drag onto a category bin, or a click.
-            self._maybe_drag = True
-            self._app_drag = False
-            self._press_global = event.globalPosition().toPoint()
+        if not self._fader_rect.contains(pos):
+            if self.app:
+                # Off the fader an app strip is a grab handle: it becomes a
+                # drag onto a category bin, or a click opening the route menu.
+                self._maybe_drag = True
+                self._app_drag = False
+                self._press_global = event.globalPosition().toPoint()
             return
         if self.muted:
             self.muteToggled.emit(self.key)
@@ -271,8 +282,22 @@ class Strip(QWidget):
         if eq_hover != self._eq_hover:
             self._eq_hover = eq_hover
             repaint = True
+        self._sync_cursor(pos)
         if repaint:
             self.update()
+
+    def _sync_cursor(self, pos: QPointF) -> None:
+        """Only the live areas advertise themselves as clickable."""
+        if self._mute_rect.contains(pos) or (self.eq_icon and self._eq_rect.contains(pos)):
+            shape = Qt.CursorShape.PointingHandCursor
+        elif self._fader_rect.contains(pos):
+            shape = Qt.CursorShape.PointingHandCursor
+        elif self.app:
+            shape = Qt.CursorShape.OpenHandCursor
+        else:
+            shape = Qt.CursorShape.ArrowCursor
+        if self.cursor().shape() != shape:
+            self.setCursor(shape)
 
     def mouseReleaseEvent(self, event) -> None:
         if self._maybe_drag:
@@ -289,6 +314,7 @@ class Strip(QWidget):
             self.volumeChanged.emit(self.key, self.volume)
 
     def leaveEvent(self, event) -> None:
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         if self._mute_hover or self._eq_hover:
             self._mute_hover = False
             self._eq_hover = False
@@ -296,10 +322,13 @@ class Strip(QWidget):
 
     def wheelEvent(self, event) -> None:
         delta = event.angleDelta().y()
-        inside_fader = self.fader_top <= event.position().y() <= self.fader_bot
-        if self._allow_scroll_through and not inside_fader:
-            self.scrolled.emit(delta)
-            event.accept()
+        inside_fader = self._fader_rect.contains(event.position())
+        if not inside_fader:
+            if self._allow_scroll_through:
+                self.scrolled.emit(delta)
+                event.accept()
+            else:
+                event.ignore()
             return
         if self.muted:
             self.muteToggled.emit(self.key)
