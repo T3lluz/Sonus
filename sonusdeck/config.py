@@ -162,7 +162,7 @@ Type=Application
 Name={name}
 Comment={comment}
 Exec={exec}
-Icon=audio-volume-high
+Icon={icon}
 Terminal=false
 Categories=AudioVideo;Audio;Mixer;
 StartupNotify=false
@@ -170,6 +170,34 @@ X-GNOME-Autostart-enabled=true
 X-KDE-Shortcuts={shortcuts}
 NoDisplay={nodisplay}
 """
+
+ICON_SOURCE = Path(__file__).parent / "data" / "icon.png"
+ICON_INSTALL_PATH = (
+    _xdg("XDG_DATA_HOME", ".local/share")
+    / "icons" / "hicolor" / "512x512" / "apps" / f"{APP_ID}.png"
+)
+
+
+def install_icon() -> str:
+    """Copy the app icon into the hicolor theme; return the Icon= value.
+
+    Falls back to a stock theme icon if the bundled one is missing (e.g. a
+    stripped-down install) or the copy fails.
+    """
+    try:
+        if ICON_SOURCE.is_file():
+            if (
+                not ICON_INSTALL_PATH.is_file()
+                or ICON_INSTALL_PATH.stat().st_size != ICON_SOURCE.stat().st_size
+            ):
+                ICON_INSTALL_PATH.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ICON_SOURCE, ICON_INSTALL_PATH)
+            return APP_ID
+        if ICON_INSTALL_PATH.is_file():
+            return APP_ID
+    except OSError:
+        pass
+    return "audio-volume-high"
 
 
 _SYSTEMD_UNIT_TEMPLATE = """[Unit]
@@ -224,6 +252,7 @@ def set_autostart(enabled: bool) -> None:
             name=APP_NAME,
             comment="Hotkey volume mixer for PipeWire",
             exec=command,
+            icon=install_icon(),
             nodisplay="true",
             shortcuts="",
         ),
@@ -248,6 +277,7 @@ def write_toggle_desktop(hotkey: str = HOTKEY) -> Path:
             name=f"{APP_NAME} Toggle",
             comment="Show or hide the SonusDeck mixer",
             exec=toggle_command(),
+            icon=install_icon(),
             nodisplay="true",
             shortcuts=hotkey,
         ),
@@ -263,6 +293,7 @@ def write_launch_desktop() -> Path:
             name=APP_NAME,
             comment="Hotkey volume mixer for PipeWire",
             exec=show_command(),
+            icon=install_icon(),
             nodisplay="false",
             shortcuts="",
         ),

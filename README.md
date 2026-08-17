@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="sonusdeck/data/icon.png" width="112" alt="SonusDeck icon">
+
 # SonusDeck
 
 **Sonar-style volume mixer for PipeWire.** Master / Game / Chat / Media / Aux channels, drag-and-drop app routing, and a 10-band equalizer per category — one hotkey away.

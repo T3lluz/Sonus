@@ -78,7 +78,7 @@ class EqSlider(QWidget):
             return False
         delta = self.value - self.display
         if abs(delta) > 0.02:
-            self.display += delta * 0.18
+            self.display += delta * 0.09
             self.update()
             return True
         if self.display != self.value:

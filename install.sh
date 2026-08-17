@@ -127,11 +127,12 @@ if [ "$ACTION" = "uninstall" ]; then
     rm -f "$BIN_DIR/sonusdeck" "$BIN_DIR/sonusdeck-toggle"
     ok
 
-    step "Desktop entries + autostart"
+    step "Desktop entries, icon + autostart"
     rm -f "$CONFIG_HOME/autostart/sonusdeck.desktop" \
           "$CONFIG_HOME/systemd/user/sonusdeck.service" \
           "$DATA_HOME/applications/sonusdeck.desktop" \
-          "$DATA_HOME/applications/sonusdeck-toggle.desktop"
+          "$DATA_HOME/applications/sonusdeck-toggle.desktop" \
+          "$DATA_HOME/icons/hicolor/512x512/apps/sonusdeck.png"
     ok
 
     step "Application + virtualenv"

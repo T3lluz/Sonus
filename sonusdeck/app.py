@@ -45,9 +45,12 @@ def main(argv: list[str] | None = None) -> int:
 
     from PyQt6.QtWidgets import QApplication
 
+    from PyQt6.QtGui import QIcon
+
     from . import dbusapi, ipc, shortcut
     from .config import (
-        APP_NAME, HOTKEY, load_settings, save_settings, set_autostart, write_launch_desktop,
+        APP_NAME, HOTKEY, ICON_SOURCE, load_settings, save_settings, set_autostart,
+        write_launch_desktop,
     )
     from .graph import GraphProcess
     from .ui.panel import Panel
@@ -63,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)
     app.setApplicationDisplayName(APP_NAME)
+    if ICON_SOURCE.is_file():
+        app.setWindowIcon(QIcon(str(ICON_SOURCE)))
     app.setQuitOnLastWindowClosed(False)
 
     if args.quit:
